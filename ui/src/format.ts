@@ -38,7 +38,7 @@ export function num(v: number): string {
 
 export const bmcURL = (ip?: string) => (ip ? `https://${ip}` : undefined)
 
-/** GPU product label → short marketing name, e.g. NVIDIA-GeForce-RTX-5090 → RTX 5090. */
+/** Shortens a GPU product label, e.g. NVIDIA-GeForce-RTX-5090 becomes RTX 5090. */
 export function gpuShort(model?: string): string {
   if (!model) return ''
   return model

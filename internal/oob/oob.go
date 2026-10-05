@@ -1,11 +1,12 @@
-// Package oob performs out-of-band power operations against a BMC over the network,
-// which keeps working when the node (and therefore its agent) is down.
+// Package oob executes power operations against a BMC over its management network,
+// independently of the state of the host operating system.
 package oob
 
 import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -16,39 +17,20 @@ import (
 	"github.com/aireet/kube-bmc/internal/ipmi"
 )
 
-// Action is a power operation. The names mirror Redfish ResetType values.
-type Action string
-
-const (
-	On               Action = "On"
-	GracefulShutdown Action = "GracefulShutdown"
-	ForceOff         Action = "ForceOff"
-	GracefulRestart  Action = "GracefulRestart"
-	ForceRestart     Action = "ForceRestart"
-	PowerCycle       Action = "PowerCycle"
-)
-
-// Actions lists every supported action, in the order the UI shows them.
-var Actions = []Action{On, GracefulShutdown, GracefulRestart, ForceRestart, PowerCycle, ForceOff}
-
-func (a Action) Valid() bool {
-	for _, x := range Actions {
-		if a == x {
-			return true
-		}
-	}
-	return false
+// ipmiVerb maps actions to `ipmitool chassis power` sub-commands. IPMI has no
+// graceful restart, so GracefulRestart is only available over Redfish.
+var ipmiVerb = map[bmcv1.PowerAction]string{
+	bmcv1.ActionOn:               "on",
+	bmcv1.ActionGracefulShutdown: "soft",
+	bmcv1.ActionForceOff:         "off",
+	bmcv1.ActionForceRestart:     "reset",
+	bmcv1.ActionPowerCycle:       "cycle",
 }
 
-// ipmitool chassis power sub-commands for each action.
-var ipmiVerb = map[Action]string{
-	On: "on", GracefulShutdown: "soft", ForceOff: "off", ForceRestart: "reset", PowerCycle: "cycle",
-	// IPMI has no graceful restart; a soft-off followed by on is not atomic, so it is not offered.
-}
-
+// Credentials authenticate against the BMC.
 type Credentials struct{ Username, Password string }
 
-// Target is everything needed to reach one BMC.
+// Target identifies a BMC endpoint.
 type Target struct {
 	Address  string
 	Protocol bmcv1.Protocol
@@ -56,7 +38,8 @@ type Target struct {
 	Creds    Credentials
 }
 
-// TargetFor resolves the address of a BMC: spec override first, then the in-band discovered IP.
+// TargetFor resolves the endpoint of a BMC. spec.address takes precedence over the
+// address discovered in-band by the node agent.
 func TargetFor(b *bmcv1.BMC, creds Credentials) (Target, error) {
 	addr := b.Spec.Address
 	if addr == "" {
@@ -72,36 +55,10 @@ func TargetFor(b *bmcv1.BMC, creds Credentials) (Target, error) {
 	return Target{Address: addr, Protocol: proto, Insecure: b.Spec.InsecureSkipVerify, Creds: creds}, nil
 }
 
-// PowerState reads the current power state.
-func PowerState(ctx context.Context, t Target) (bmcv1.PowerState, error) {
-	if t.Protocol == bmcv1.ProtocolIPMI {
-		out, err := lanplus(t).Run(ctx, "chassis", "power", "status")
-		if err != nil {
-			return bmcv1.PowerUnknown, err
-		}
-		if strings.Contains(string(out), "is on") {
-			return bmcv1.PowerOn, nil
-		}
-		return bmcv1.PowerOff, nil
-	}
-	sys, c, err := redfishSystem(ctx, t)
-	if err != nil {
-		return bmcv1.PowerUnknown, err
-	}
-	defer c.Logout()
-	switch sys.PowerState {
-	case schemas.OnPowerState, schemas.PoweringOnPowerState:
-		return bmcv1.PowerOn, nil
-	case schemas.OffPowerState, schemas.PoweringOffPowerState:
-		return bmcv1.PowerOff, nil
-	}
-	return bmcv1.PowerUnknown, nil
-}
-
 // Power executes a power action.
-func Power(ctx context.Context, t Target, a Action) error {
+func Power(ctx context.Context, t Target, a bmcv1.PowerAction) error {
 	if !a.Valid() {
-		return fmt.Errorf("unknown action %q", a)
+		return fmt.Errorf("unsupported action %q", a)
 	}
 	if t.Protocol == bmcv1.ProtocolIPMI {
 		verb, ok := ipmiVerb[a]
@@ -116,8 +73,10 @@ func Power(ctx context.Context, t Target, a Action) error {
 		return err
 	}
 	defer c.Logout()
-	_, err = sys.Reset(schemas.ResetType(a))
-	return err
+	if _, err := sys.Reset(schemas.ResetType(a)); err != nil {
+		return fmt.Errorf("redfish %s: reset %s: %w", t.Address, a, err)
+	}
+	return nil
 }
 
 func lanplus(t Target) ipmi.Exec {
@@ -125,7 +84,7 @@ func lanplus(t Target) ipmi.Exec {
 	if err != nil {
 		host, port = t.Address, "623"
 	}
-	// -E reads the password from IPMI_PASSWORD so it never shows up in the process list.
+	// -E reads the password from IPMI_PASSWORD instead of the command line.
 	return ipmi.Exec{
 		Extra: []string{"-I", "lanplus", "-H", host, "-p", port, "-U", t.Creds.Username, "-E", "-N", "3", "-R", "2"},
 		Env:   []string{"IPMI_PASSWORD=" + t.Creds.Password},
@@ -138,11 +97,17 @@ func redfishSystem(ctx context.Context, t Target) (*schemas.ComputerSystem, *gof
 		endpoint = "https://" + endpoint
 	}
 	c, err := gofish.ConnectContext(ctx, gofish.ClientConfig{
-		Endpoint: endpoint, Username: t.Creds.Username, Password: t.Creds.Password,
-		Insecure: t.Insecure, BasicAuth: true, TLSHandshakeTimeout: int((10 * time.Second).Seconds()),
+		Endpoint:            endpoint,
+		Username:            t.Creds.Username,
+		Password:            t.Creds.Password,
+		Insecure:            t.Insecure,
+		BasicAuth:           true,
+		TLSHandshakeTimeout: 10,
+		// gofish applies Insecure and the handshake timeout only to an *http.Transport.
+		HTTPClient: &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment}},
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("redfish connect %s: %w", t.Address, err)
+		return nil, nil, fmt.Errorf("redfish %s: connect: %w", t.Address, err)
 	}
 	systems, err := c.Service.Systems()
 	if err != nil {

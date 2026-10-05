@@ -1,8 +1,10 @@
-// Package collector polls the local BMC on three cadences and keeps the latest Snapshot in memory:
+// Package collector polls the local BMC and keeps the latest Snapshot in memory.
 //
-//   - fast (sensors, chassis, power, SEL info): cheap, ~1s per round with an SDR cache
-//   - inventory (FRU, LAN, firmware, thresholds): rarely changes, `ipmitool sensor` alone takes ~10s
-//   - SEL entries: walking the log over KCS can take 30s+, so it is only re-read when `sel info` shows a new event
+// Data is collected on three schedules according to its cost and rate of change:
+//
+//   - Interval: sensors, chassis status, DCMI power and SEL info.
+//   - InventoryInterval: FRU, LAN configuration, firmware and sensor thresholds.
+//   - SEL entries are read only after `sel info` reports a new entry, at most once per SELMinInterval.
 package collector
 
 import (
@@ -15,7 +17,7 @@ import (
 	"github.com/aireet/kube-bmc/internal/ipmi"
 )
 
-// Snapshot is everything the agent knows about its BMC. It is served as-is by the agent's HTTP API.
+// Snapshot is the collected state of a BMC. The agent serves it on /api/v1/snapshot.
 type Snapshot struct {
 	Node        string                     `json:"node"`
 	CollectedAt time.Time                  `json:"collectedAt"`
@@ -29,7 +31,7 @@ type Snapshot struct {
 	Sensors     []ipmi.Sensor              `json:"sensors"`
 	Events      []ipmi.Event               `json:"events"`
 	Thresholds  map[string]ipmi.Thresholds `json:"-"`
-	// Errors holds the last error per collection phase; an empty map means everything worked.
+	// Errors holds the most recent error of each failing collection phase.
 	Errors map[string]string `json:"errors,omitempty"`
 }
 
@@ -50,7 +52,7 @@ type Collector struct {
 	mu        sync.RWMutex
 	snap      Snapshot
 	selReadAt time.Time
-	selSeenAt string // Last Add Time when the SEL was last read
+	selSeenAt string // SEL "Last Add Time" at the last read
 	selBusy   bool
 	updates   chan struct{}
 }
@@ -65,10 +67,10 @@ func New(node string, client *ipmi.Client, opts Options, log *slog.Logger) *Coll
 	}
 }
 
-// Updates fires (coalesced) after every collection round.
+// Updates receives a value after each collection round. Values are coalesced.
 func (c *Collector) Updates() <-chan struct{} { return c.updates }
 
-// Snapshot returns a deep-enough copy of the latest state with thresholds merged into sensors.
+// Snapshot returns a copy of the latest state with thresholds merged into the sensors.
 func (c *Collector) Snapshot() Snapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -203,7 +205,7 @@ func (c *Collector) fast(ctx context.Context) {
 	}
 }
 
-// maybeReadSEL starts a background SEL read when the log changed and the rate limit allows it.
+// maybeReadSEL starts a background SEL read if the log changed and SELMinInterval has elapsed.
 func (c *Collector) maybeReadSEL(ctx context.Context) {
 	c.mu.Lock()
 	last := c.snap.SELInfo.LastAddTime

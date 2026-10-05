@@ -11,12 +11,12 @@ import (
 	"strings"
 )
 
-// Runner executes ipmitool. It exists so tests and demo mode can replace the binary.
+// Runner executes ipmitool commands.
 type Runner interface {
 	Run(ctx context.Context, args ...string) ([]byte, error)
 }
 
-// Exec runs a real ipmitool binary. Extra args (e.g. "-I", "lanplus", "-H", …) are prepended to every call.
+// Exec runs the ipmitool binary. Extra is prepended to the arguments of every call.
 type Exec struct {
 	Path  string
 	Extra []string
@@ -45,10 +45,10 @@ func (e Exec) Run(ctx context.Context, args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-// Client is a read-only view of the local BMC.
+// Client reads the local BMC. It issues read-only commands only.
 //
-// Reading the SDR repository over KCS is slow (seconds), so the client dumps it once to a
-// cache file and passes `-S` to every sensor and SEL command, which is ~6x faster.
+// Reading the SDR repository over KCS takes several seconds, so the client dumps it to a
+// cache file and passes `-S` to sensor and SEL commands.
 type Client struct {
 	Runner   Runner
 	CacheDir string
@@ -59,7 +59,7 @@ func NewClient(r Runner, cacheDir string) *Client {
 	return &Client{Runner: r, CacheDir: cacheDir}
 }
 
-// RefreshSDRCache (re)builds the SDR cache file. Failure is not fatal: commands fall back to live reads.
+// RefreshSDRCache rebuilds the SDR cache file. On failure, commands read the SDR repository directly.
 func (c *Client) RefreshSDRCache(ctx context.Context) error {
 	if c.CacheDir == "" {
 		return nil
@@ -134,7 +134,7 @@ func (c *Client) SELInfo(ctx context.Context) (SELInfo, error) {
 	return ParseSELInfo(out), err
 }
 
-// SEL returns the newest n events. This walks the whole log over KCS and can take tens of seconds.
+// SEL returns the newest n events. ipmitool reads the entire log, which can take tens of seconds.
 func (c *Client) SEL(ctx context.Context, n int) ([]Event, error) {
 	out, err := c.Runner.Run(ctx, c.withCache("sel", "elist", "last", strconv.Itoa(n))...)
 	return ParseSEL(out), err

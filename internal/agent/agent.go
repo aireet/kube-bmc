@@ -1,5 +1,5 @@
-// Package agent runs on every node (DaemonSet). It owns the status of its node's BMC object
-// and serves the full, live snapshot (all sensors, SEL events) to the server.
+// Package agent implements the node agent. It maintains the BMC object of its node and
+// serves the full snapshot, including all sensors and SEL entries, over HTTP.
 package agent
 
 import (
@@ -29,8 +29,8 @@ import (
 type Options struct {
 	NodeName string
 	Listen   string
-	// StatusInterval caps how often fast-moving readings (watts, temperature) are written to the API server.
-	// Health, power state and inventory changes are written immediately.
+	// StatusInterval is the maximum time between status writes. Changes to health, power
+	// state or inventory are written immediately; changes to readings only are deferred.
 	StatusInterval time.Duration
 	Version        string
 }
@@ -97,7 +97,7 @@ func (a *Agent) handler() http.Handler {
 	return mux
 }
 
-// sync creates the BMC object if needed and writes the status when it changed meaningfully.
+// sync creates the BMC object if needed and writes its status.
 func (a *Agent) sync(ctx context.Context) error {
 	if !a.col.Ready() {
 		return nil
@@ -129,12 +129,12 @@ func (a *Agent) sync(ctx context.Context) error {
 	return nil
 }
 
-// volatileFree drops readings that change every round so they don't force a write on their own.
+// volatileFree clears fields that change on every round, so that they alone do not trigger a write.
 func volatileFree(s bmcv1.BMCStatus) bmcv1.BMCStatus {
 	s.PowerWatts, s.InletTemperature = nil, nil
 	s.Problems = slices.Clone(s.Problems)
 	for i := range s.Problems {
-		s.Problems[i].Message = "" // messages embed live readings, e.g. "41 degrees C above …"
+		s.Problems[i].Message = "" // messages contain live readings
 	}
 	return s
 }

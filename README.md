@@ -1,252 +1,293 @@
 <p align="center">
-  <img src="docs/images/logo.svg" width="88" alt="kube-bmc logo">
+  <img src="docs/images/logo.svg" width="80" alt="kube-bmc logo">
 </p>
 
 <h1 align="center">kube-bmc</h1>
 
 <p align="center">
-  <b>Your servers' BMCs, as Kubernetes resources.</b><br>
-  Zero-config hardware discovery, health and power control for bare-metal clusters — no BMC passwords, no spreadsheets.
+  Baseboard management controllers as Kubernetes resources: in-band discovery, hardware health,<br>
+  out-of-band power control, a web dashboard, a kubectl plugin and an MCP endpoint for AI agents.
 </p>
 
 <p align="center">
   <a href="https://github.com/aireet/kube-bmc/actions/workflows/ci.yml"><img src="https://github.com/aireet/kube-bmc/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://goreportcard.com/report/github.com/aireet/kube-bmc"><img src="https://goreportcard.com/badge/github.com/aireet/kube-bmc" alt="Go Report Card"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
-  <a href="https://github.com/aireet/kube-bmc/pkgs/container/kube-bmc"><img src="https://img.shields.io/badge/image-ghcr.io-2088ff?logo=docker&logoColor=white" alt="Image"></a>
 </p>
 
 <p align="center">
   <a href="README.zh-CN.md">简体中文</a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#security">Security</a>
+  <a href="#installation">Installation</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="docs/authentication.md">Authentication</a> ·
+  <a href="docs/mcp.md">MCP</a> ·
+  <a href="docs/kubectl.md">kubectl plugin</a>
 </p>
 
-![kube-bmc dashboard](docs/images/fleet.png)
+![Dashboard](docs/images/fleet.png)
+
+## Overview
+
+kube-bmc runs an agent on every node that reads the local BMC through the in-band IPMI
+interface (`/dev/ipmi0`). No BMC addresses or credentials are needed for monitoring. Each node
+gets a cluster-scoped `BMC` object that is owned by its `Node`:
 
 ```console
 $ kubectl get bmc
-NAME          NODE          BMC-IP        VENDOR      MODEL                POWER   WATTS   INLET   HEALTH     AGE
-gpu-h200-01   gpu-h200-01   10.20.0.16    Dell Inc.   PowerEdge XE9680     On      7412    23      OK         41d
-gpu-h200-02   gpu-h200-02   10.20.0.205   Dell Inc.   PowerEdge XE9680     On      7233    24      Critical   41d
-gpu-5090-01   gpu-5090-01   10.20.0.194   Gooxi       SY8108G-G4           On      4153    22      OK         12d
-infer-02      infer-02      10.20.0.90    Lenovo      ThinkSystem SR675 V3 Off     18      22      OK         93d
+NAME        NODE        BMC-IP          VENDOR   MODEL        POWER   WATTS   INLET   HEALTH     AGE
+host002     host002     10.30.4.27      LCWT     R8285        On      951     26      Warning    2d
+server131   server131   10.20.0.31      Gooxi    SY8108G-G4   On      1240    43      Critical   2d
+
+$ kubectl get bmc server131 -o jsonpath='{range .status.problems[*]}{.severity}{"\t"}{.source}{"\t"}{.message}{"\n"}{end}'
+Critical   FAN7      0 RPM below lower non-recoverable
+Critical   chassis   Cooling/Fan Fault reported by the BMC
+Warning    sel       System Event Log is 100% full; new hardware events may be dropped
 ```
 
-## Why
+Features:
 
-Every bare-metal Kubernetes cluster has a second, invisible control plane: the **BMC** (iDRAC, iLO, XClarity, Supermicro IPMI, AMI MegaRAC…) in every server. When a node goes `NotReady`, the answer is usually there — a dead fan, a lost PSU, a full event log — but getting to it means finding the BMC IP in a spreadsheet, digging up a password, and clicking through a vendor web UI.
-
-kube-bmc closes that gap:
-
-- **Zero configuration.** A DaemonSet reads each server's BMC **in-band** over `/dev/ipmi0`. No BMC IPs to collect, no credentials to manage — every node registers itself.
-- **Kubernetes-native.** One cluster-scoped `BMC` object per node, owned by the `Node` (garbage-collected with it). `kubectl get bmc` shows your entire fleet's hardware.
-- **Problems, not just numbers.** Threshold violations, chassis faults, failed PSUs and a full System Event Log become a short, human-readable `status.problems` list and an `OK / Warning / Critical` health.
-- **A dashboard people actually like.** Fleet overview, per-server sensors with thresholds, SEL viewer, light/dark, English/中文.
-- **Out-of-band power control** over Redfish or IPMI-over-LAN that keeps working when the node is down. Off by default, double-confirmed, audited as Kubernetes Events.
+- **Inventory and health** from any IPMI 2.0 BMC: FRU data, firmware, management network,
+  sensors with thresholds, chassis faults, DCMI power and the System Event Log. Health is
+  summarized as `OK`, `Warning` or `Critical` with a list of problems.
+- **Power control** (`On`, `GracefulShutdown`, `GracefulRestart`, `ForceRestart`, `PowerCycle`,
+  `ForceOff`) over Redfish or IPMI-over-LAN. Every request is a `BMCAction` object, which serves
+  as the audit record. Disabled by default.
+- **Three interfaces with one permission model**: the web dashboard, the `kubectl bmc` plugin
+  and an MCP endpoint for AI agents. All of them are authorized with Kubernetes RBAC.
+- **Authentication** with OpenID Connect for the dashboard, and OIDC or Kubernetes bearer tokens
+  for API and MCP clients.
 - **Prometheus metrics** for every sensor, power draw, health and SEL usage.
-- **Vendor-neutral.** Anything that speaks IPMI 2.0 — which is every server BMC shipped in the last 15 years.
 
-## Screenshots
+## Installation
 
-| Server detail | Sensors (dark) |
-|---|---|
-| ![Server](docs/images/server.png) | ![Sensors](docs/images/sensors.png) |
+Requirements:
 
-## Quick start
-
-**Try the dashboard locally** (synthetic 15-server fleet, no cluster needed):
-
-```bash
-docker run --rm -p 8080:8080 ghcr.io/aireet/kube-bmc:edge server --demo
-# open http://localhost:8080
-```
-
-**Install into a cluster** (Helm ≥ 3.8):
+- Kubernetes 1.30 or later (the chart uses a ValidatingAdmissionPolicy).
+- Nodes with a BMC and the IPMI kernel modules loaded (`ipmi_si`, `ipmi_devintf`), so that
+  `/dev/ipmi0` exists. Nodes without a BMC can be excluded with `agent.nodeSelector`.
 
 ```bash
 helm install kube-bmc oci://ghcr.io/aireet/charts/kube-bmc \
   --namespace kube-bmc-system --create-namespace
 
-kubectl get bmc                                         # appears within ~1 minute
-kubectl -n kube-bmc-system port-forward svc/kube-bmc 8080:80
+kubectl get bmc
+kubectl -n kube-bmc-system port-forward svc/kube-bmc 8080:80   # dashboard on http://localhost:8080
 ```
 
-Or with plain manifests: `kubectl apply -f https://github.com/aireet/kube-bmc/releases/latest/download/install.yaml`
+Plain manifests are attached to each release:
+`kubectl apply -f https://github.com/aireet/kube-bmc/releases/latest/download/install.yaml`.
 
-### Requirements
+The chart installs without authentication. Before exposing the dashboard beyond a port-forward,
+configure [authentication](docs/authentication.md).
 
-- Linux nodes with a BMC and the IPMI kernel modules loaded (`ipmi_si`, `ipmi_devintf`); check that `/dev/ipmi0` exists. On most distributions they load automatically on server hardware; otherwise: `modprobe ipmi_si ipmi_devintf`.
-- Kubernetes ≥ 1.27. Nodes without a BMC (VMs, cloud instances) simply report collection errors — exclude them with `agent.nodeSelector`.
-
-## How it works
+## Architecture
 
 ```mermaid
 flowchart LR
-  subgraph node["Every node (DaemonSet)"]
-    A[kube-bmc agent] -- "ipmitool, in-band<br>/dev/ipmi0 (KCS)" --> B[(BMC)]
+  subgraph node["Each node"]
+    A[kube-bmc agent<br>DaemonSet] -- "ipmitool (in-band)<br>/dev/ipmi0" --> B[(BMC)]
   end
-  A -- "creates BMC object,<br>patches status" --> K[(Kubernetes API)]
+  A -- "BMC object" --> K[(Kubernetes API)]
   A -. "/metrics" .-> P[Prometheus]
-  S[kube-bmc server<br>dashboard + API] -- watch --> K
-  S -- "live sensors & SEL" --> A
-  S -- "power actions: Redfish / IPMI-over-LAN<br>(works when the node is down)" --> B
-  U((You)) --> S
+  S[kube-bmc server<br>Deployment] -- "watch BMC, BMCAction" --> K
+  S -- "live sensors and SEL" --> A
+  S -- "BMCAction: Redfish /<br>IPMI-over-LAN" --> B
+  U[Dashboard / MCP clients] -- "OIDC or bearer token" --> S
+  C[kubectl bmc] -- "kubeconfig" --> K
 ```
 
-**The agent** (one per node, privileged) polls the local BMC with `ipmitool` on three cadences, tuned on real hardware:
+**Agent.** Runs privileged on every node and polls the local BMC with read-only `ipmitool`
+commands on three schedules:
 
-| What | Interval | Why |
+| Data | Default interval | Notes |
 |---|---|---|
-| Sensors, chassis status, DCMI power, SEL info | 30s | ~1s per round thanks to a local SDR cache (6× faster than live SDR reads) |
-| FRU, LAN config, firmware, sensor thresholds | 10m | `ipmitool sensor` alone takes ~10s over KCS |
-| System Event Log entries | only when `sel info` shows a new event (≥5m apart) | walking a full SEL over KCS can take 30s+ |
+| Sensors, chassis status, DCMI power, SEL info | 30s | Uses a local SDR cache; one round takes about one second |
+| FRU, LAN configuration, firmware, thresholds | 10m | `ipmitool sensor` takes about ten seconds over KCS |
+| SEL entries | When `sel info` reports a change, at most every 5m | Reading the full SEL can take more than 30 seconds |
 
-It writes the summary to the `BMC` status — immediately when health, power or inventory changes, otherwise at most every 2 minutes, so a 1000-node cluster doesn't hammer the API server with temperature updates. Full sensor lists and SEL events are served live from the agent instead of being stored in etcd.
+The agent writes a summary into the `BMC` status. Changes to health, power state and inventory
+are written immediately, while changes that only affect readings are written at most every two minutes.
+Complete sensor lists and SEL entries are served by the agent on request and are not stored in etcd.
 
-**The server** (a small Deployment) watches `BMC`s, `Node`s and agent pods through an informer cache, serves the embedded Vue 3 + Naive UI dashboard and a JSON API, and performs out-of-band power actions.
+**Server.** Serves the dashboard, the JSON API and the MCP endpoint, authenticates users, and
+runs the controller that executes `BMCAction` objects. It is stateless and reads through an
+informer cache.
 
-Everything ships as **one 70 MB image** (`kube-bmc agent` / `kube-bmc server`).
-
-## The `BMC` resource
-
-```yaml
-apiVersion: bmc.kube-bmc.io/v1alpha1
-kind: BMC
-metadata:
-  name: gpu-h200-02            # = node name
-spec:
-  nodeName: gpu-h200-02
-  # Everything below is optional and only used for out-of-band power actions.
-  address: 10.20.0.205         # override the in-band discovered IP (IP, hostname, or host:port)
-  protocol: Redfish            # or IPMI
-  credentialsRef:
-    name: bmc-gpu-h200-02      # Secret with username/password in the kube-bmc namespace
-status:
-  health: Critical
-  powerState: "On"
-  powerWatts: 7233
-  inletTemperature: 24
-  problems:
-    - { severity: Critical, source: FAN3,    message: "0 RPM below lower non-recoverable" }
-    - { severity: Critical, source: chassis, message: "Cooling/Fan Fault reported by the BMC" }
-  device:     { manufacturer: Dell Inc., product: PowerEdge XE9680, serialNumber: … }
-  controller: { firmwareVersion: 7.10.50.00, ipmiVersion: "2.0", guid: … }
-  network:    { ipAddress: 10.20.0.205, macAddress: …, source: Static Address, channel: 1 }
-  chassis:    { powerRestorePolicy: previous, faults: ["Cooling/Fan Fault"] }
-  sel:        { entries: 715, usedPercent: 9 }
-  sensors:    { total: 55, ok: 53, warning: 0, critical: 1, noReading: 1 }
-  conditions: [{ type: Ready, status: "True", reason: Collecting }]
-```
+**kubectl plugin.** Reads `BMC` and `BMCAction` objects directly and fetches live data from the
+agents through the API server's pod proxy, using the caller's kubeconfig.
 
 ## Power actions
 
-Power control is **disabled by default**. To enable it:
+A power action is a `BMCAction` object:
+
+```yaml
+apiVersion: bmc.kube-bmc.io/v1alpha1
+kind: BMCAction
+metadata:
+  generateName: gpu-01-forcerestart-
+spec:
+  bmcName: gpu-01
+  action: ForceRestart
+  requestedBy: oidc:alice@example.com
+  reason: kernel hang, node unreachable
+status:
+  phase: Succeeded            # Pending, Running, Succeeded, Failed or Rejected
+  message: ForceRestart accepted by the BMC
+  powerStateBefore: "On"
+```
+
+- The server executes each action once, out-of-band through Redfish or IPMI-over-LAN, so it
+  works when the node is down. The outcome is also recorded as an Event on the `Node`.
+- A ValidatingAdmissionPolicy requires `spec.requestedBy` to equal the authenticated user. Only
+  the kube-bmc server, which authenticates dashboard and MCP users itself, may set another value.
+- With `server.powerActions.enabled=false` (the default), actions are recorded and rejected.
+- Finished actions are deleted after `server.powerActions.ttl` (seven days by default).
+
+To enable power actions, provide BMC credentials:
 
 ```bash
 kubectl -n kube-bmc-system create secret generic bmc-credentials \
-  --from-literal=username=admin --from-literal=password='…'
+  --from-literal=username=kube-bmc --from-literal=password='...'
 
 helm upgrade kube-bmc oci://ghcr.io/aireet/charts/kube-bmc -n kube-bmc-system --reuse-values \
   --set server.powerActions.enabled=true \
   --set server.credentials.existingSecret=bmc-credentials
 ```
 
-Supported actions: `On`, `GracefulShutdown`, `GracefulRestart`, `ForceRestart`, `PowerCycle`, `ForceOff`. Every request must repeat the server name (`{"action": "ForceRestart", "confirm": "gpu-h200-02"}`) and is recorded as an Event on the Node:
+The BMC address is discovered in-band. To override it, or to use per-server credentials or IPMI
+instead of Redfish, edit the `BMC` spec (see [examples/bmc-override.yaml](examples/bmc-override.yaml)).
+
+## Access control
+
+The dashboard, the MCP endpoint and the kubectl plugin share one permission model based on
+Kubernetes RBAC. The chart creates two ClusterRoles:
+
+| Role | Grants |
+|---|---|
+| `kube-bmc-viewer` | Read BMCs, actions, live sensors and events. Aggregated into the built-in `view` role. |
+| `kube-bmc-operator` | `kube-bmc-viewer` plus creating `BMCAction` objects |
+
+```yaml
+# values.yaml
+rbac:
+  viewers:
+    - { kind: Group, name: "oidc:engineering", apiGroup: rbac.authorization.k8s.io }
+  operators:
+    - { kind: Group, name: "oidc:sre", apiGroup: rbac.authorization.k8s.io }
+```
+
+For dashboard and MCP users the server performs a SubjectAccessReview with the user's OIDC
+username and groups (prefixed with `oidc:` by default). See [docs/authentication.md](docs/authentication.md).
+
+## MCP endpoint
+
+The server exposes the Model Context Protocol over Streamable HTTP at `/mcp`. Tools:
+`fleet_summary`, `list_servers`, `get_server`, `get_sensors`, `get_events`, `list_actions`,
+`get_action` and `power_action`, plus a `diagnose_server` prompt.
+
+```bash
+claude mcp add --transport http kube-bmc https://kube-bmc.example.com/mcp \
+  --header "Authorization: Bearer $TOKEN"
+```
+
+`$TOKEN` is an OIDC ID token or a Kubernetes ServiceAccount token whose identity is bound to
+`kube-bmc-viewer` or `kube-bmc-operator`.
+
+`power_action` is annotated as destructive, requires a reason and is subject to the
+`kube-bmc-operator` role. See [docs/mcp.md](docs/mcp.md).
+
+## kubectl plugin
 
 ```console
-$ kubectl describe node gpu-h200-02
-Events:
-  Normal  BMCPowerAction  12s  kube-bmc  ops@example.com requested ForceRestart via kube-bmc
+$ kubectl bmc list
+$ kubectl bmc describe server131
+$ kubectl bmc sensors server131 --problems
+$ kubectl bmc events server131 --grep fan
+$ kubectl bmc power server131 ForceRestart --reason "kernel hang" --wait
+$ kubectl bmc actions
 ```
+
+Download `kubectl-bmc` from the [releases](https://github.com/aireet/kube-bmc/releases) and place
+it on your `PATH`. See [docs/kubectl.md](docs/kubectl.md).
 
 ## Metrics
 
-Agents expose Prometheus metrics on `:9580/metrics` (enable `metrics.podMonitor.enabled` for the Prometheus Operator):
+Agents expose Prometheus metrics on port 9580. Every metric carries a `node` label. Set
+`metrics.podMonitor.enabled=true` to create a PodMonitor.
 
 | Metric | Description |
 |---|---|
-| `kube_bmc_up` | 1 if the last round reached the BMC |
-| `kube_bmc_health` | 0 unknown · 1 ok · 2 warning · 3 critical |
+| `kube_bmc_up` | 1 if the last collection round reached the BMC |
+| `kube_bmc_health` | 0 unknown, 1 ok, 2 warning, 3 critical |
 | `kube_bmc_power_on`, `kube_bmc_power_watts` | Chassis power state and DCMI power draw |
-| `kube_bmc_sensor_value{sensor,type,unit}` | Every sensor reading |
-| `kube_bmc_sensor_state{sensor,type}` | 0 ok · 1 warning · 2 critical · -1 no reading |
+| `kube_bmc_sensor_value{sensor,type,unit}` | Sensor readings |
+| `kube_bmc_sensor_state{sensor,type}` | 0 ok, 1 warning, 2 critical, -1 no reading |
 | `kube_bmc_chassis_fault{fault}` | Active chassis faults |
-| `kube_bmc_sel_used_ratio`, `kube_bmc_sel_entries` | System Event Log fill level |
+| `kube_bmc_sel_used_ratio`, `kube_bmc_sel_entries` | System Event Log usage |
 | `kube_bmc_info{manufacturer,product,serial,firmware,bmc_ip,bmc_mac}` | Inventory |
-| `kube_bmc_collect_duration_seconds{phase}` | ipmitool latency per phase |
+| `kube_bmc_collect_duration_seconds{phase}`, `kube_bmc_collect_errors_total{phase}` | Collector performance |
 
-Example alerts:
-
-```yaml
-- alert: BMCHardwareCritical
-  expr: kube_bmc_health == 3
-  for: 5m
-- alert: BMCEventLogFull
-  expr: kube_bmc_sel_used_ratio > 0.9
-  annotations:
-    summary: "SEL on {{ $labels.node }} is {{ $value | humanizePercentage }} full — new hardware events will be lost"
-```
+Example alerting rules: [examples/prometheus-rules.yaml](examples/prometheus-rules.yaml).
 
 ## Security
 
-- The **agent runs privileged** because opening `/dev/ipmi0` requires it. It only runs read-only `ipmitool` commands (`mc info`, `lan print`, `fru print`, `chassis status`, `sdr`, `sensor`, `sel info/elist`, `dcmi power reading`) and never changes BMC configuration, users or power.
-- The **server runs unprivileged** (non-root, read-only root FS, no capabilities). It can read Secrets **only in its own namespace**.
-- **Power actions** are off by default, require typing the server name to confirm, and are audited as Kubernetes Events. The dashboard has no built-in authentication. Before enabling power actions, put it behind an authenticating proxy such as [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/). kube-bmc records the user from `X-Auth-Request-Email` / `X-Forwarded-User`.
-- Keep BMC networks isolated: IPMI 2.0 has well-known weaknesses (e.g. RAKP hash disclosure). Prefer Redfish for out-of-band access.
+- The agent runs privileged because opening `/dev/ipmi0` requires it. It only issues read-only
+  commands (`mc info`, `mc guid`, `lan print`, `fru print`, `chassis status`, `sdr`, `sensor`,
+  `sel info`, `sel elist`, `dcmi power reading`).
+- The server runs as non-root with a read-only root filesystem and no capabilities. It reads
+  Secrets only in its own namespace.
+- Without authentication (`auth.mode=none`) everyone who can reach the server can read BMC data
+  and, if power actions are enabled, request them.
+- IPMI-over-LAN has known weaknesses. Keep BMC networks isolated and prefer Redfish.
 
-See [SECURITY.md](SECURITY.md) to report a vulnerability.
+Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Configuration
 
-All Helm values are documented in [`charts/kube-bmc/values.yaml`](charts/kube-bmc/values.yaml). The most common ones:
+All chart values are documented in [charts/kube-bmc/values.yaml](charts/kube-bmc/values.yaml).
 
-| Value | Default | |
+| Value | Default | Description |
 |---|---|---|
 | `agent.interval` | `30s` | Sensor polling interval |
-| `agent.nodeSelector` | `{}` | Limit agents to nodes that have a BMC |
-| `agent.statusInterval` | `2m` | Max time between status writes when only readings changed |
-| `server.powerActions.enabled` | `false` | Allow power actions |
-| `server.credentials.existingSecret` | `""` | Default out-of-band credentials |
-| `server.service.type` | `ClusterIP` | `NodePort` / `LoadBalancer` to expose the dashboard |
-| `server.ingress.enabled` | `false` | Expose the dashboard through an Ingress |
+| `agent.nodeSelector` | `{}` | Nodes that run the agent |
+| `server.externalURL` | `""` | Public URL of the dashboard; required for OIDC |
+| `server.powerActions.enabled` | `false` | Execute power actions |
+| `server.credentials.existingSecret` | `""` | Default BMC credentials (`username`, `password`) |
+| `server.service.type` | `ClusterIP` | Service type of the dashboard |
+| `auth.mode` | `none` | `none` or `oidc` |
+| `auth.oidc.issuerURL` | `""` | OIDC issuer |
+| `rbac.viewers`, `rbac.operators` | `[]` | Subjects bound to the kube-bmc roles |
 | `metrics.podMonitor.enabled` | `false` | Create a PodMonitor for the agents |
 
 ## Development
 
 ```bash
-make demo        # build UI + binary, run with the synthetic fleet on :8080
-make dev         # UI hot reload (Vite) against a demo backend
-make test        # Go unit tests (parsers are tested against real ipmitool output)
-make lint        # golangci-lint + vue-tsc
-make generate    # deepcopy + CRD after changing api/
-make image       # container image
+make ui         # build the dashboard into web/dist
+make build      # build bin/kube-bmc and bin/kubectl-bmc
+make test       # unit tests
+make lint       # golangci-lint and vue-tsc
+make generate   # deepcopy functions and CRDs after changing api/
+make dev        # dashboard with hot reload against a port-forwarded server on :8080
 ```
 
-Layout:
+| Path | Contents |
+|---|---|
+| `api/v1alpha1` | `BMC` and `BMCAction` types |
+| `cmd/kube-bmc` | Agent and server binary |
+| `cmd/kubectl-bmc` | kubectl plugin |
+| `internal/ipmi` | ipmitool client and parsers, tested against recorded output of real BMCs |
+| `internal/collector` | Polling, health evaluation and metrics |
+| `internal/agent` | BMC object lifecycle and agent HTTP API |
+| `internal/controller` | `BMCAction` execution |
+| `internal/oob` | Redfish and IPMI-over-LAN power control |
+| `internal/auth` | OIDC, bearer tokens and RBAC authorization |
+| `internal/server` | Dashboard API |
+| `internal/mcpserver` | MCP tools and prompts |
+| `internal/kubectl` | kubectl plugin commands |
+| `ui` | Vue 3 and Naive UI dashboard, embedded into the server binary |
+| `charts/kube-bmc` | Helm chart |
 
-```
-api/v1alpha1/        BMC CRD types
-cmd/kube-bmc/        single binary: agent | server
-internal/ipmi/       ipmitool wrapper and parsers (+ real hardware fixtures)
-internal/collector/  polling schedule, health evaluation, metrics
-internal/agent/      BMC object lifecycle and the agent HTTP API
-internal/oob/        out-of-band power: Redfish (gofish) and IPMI-over-LAN
-internal/server/     dashboard API, Kubernetes and demo backends
-ui/                  Vue 3 + Naive UI dashboard (built into web/dist, embedded with go:embed)
-charts/kube-bmc/     Helm chart
-```
-
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Raw `ipmitool` output from hardware we haven't seen yet (with serials removed) is especially valuable as test fixtures.
-
-## Roadmap
-
-- [ ] Redfish in-band (host interface) collection for BMCs without KCS
-- [ ] Serial-over-LAN console in the browser
-- [ ] Node conditions (`HardwareHealthy`) for scheduler/remediation integration
-- [ ] Firmware inventory and drift detection across the fleet
-- [ ] `kubectl bmc` plugin
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

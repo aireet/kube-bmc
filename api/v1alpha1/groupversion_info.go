@@ -16,7 +16,7 @@ var (
 )
 
 func addKnownTypes(s *runtime.Scheme) error {
-	s.AddKnownTypes(GroupVersion, &BMC{}, &BMCList{})
+	s.AddKnownTypes(GroupVersion, &BMC{}, &BMCList{}, &BMCAction{}, &BMCActionList{})
 	metav1.AddToGroupVersion(s, GroupVersion)
 	return nil
 }

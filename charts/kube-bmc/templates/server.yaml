@@ -15,11 +15,24 @@ rules:
   - apiGroups: ["bmc.kube-bmc.io"]
     resources: ["bmcs"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["bmc.kube-bmc.io"]
+    resources: ["bmcactions"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["bmc.kube-bmc.io"]
+    resources: ["bmcactions/status"]
+    verbs: ["get", "update", "patch"]
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
+    verbs: ["create"]
+  # Authenticate bearer tokens and check permissions of signed-in users.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
     verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -62,6 +75,19 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kube-bmc.fullname" . }}-server
     namespace: {{ .Release.Namespace }}
+{{- if and (eq .Values.auth.mode "oidc") (not .Values.auth.oidc.existingSecret) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-oidc
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  client-secret: {{ .Values.auth.oidc.clientSecret | quote }}
+  session-secret: {{ required "auth.oidc.sessionSecret (at least 32 characters) or auth.oidc.existingSecret is required" .Values.auth.oidc.sessionSecret | quote }}
+{{- end }}
 {{- if and .Values.server.credentials.create (not .Values.server.credentials.existingSecret) }}
 ---
 apiVersion: v1
@@ -125,9 +151,35 @@ spec:
             {{- if .Values.server.powerActions.enabled }}
             - --enable-power-actions
             {{- end }}
+            - --action-timeout={{ .Values.server.powerActions.timeout }}
+            - --action-ttl={{ .Values.server.powerActions.ttl }}
+            {{- with .Values.server.externalURL }}
+            - --external-url={{ . }}
+            {{- end }}
+            - --auth={{ .Values.auth.mode }}
+            {{- if eq .Values.auth.mode "oidc" }}
+            - --kubernetes-tokens={{ .Values.auth.kubernetesTokens }}
+            - --session-ttl={{ .Values.auth.sessionTTL }}
+            - --oidc-issuer-url={{ required "auth.oidc.issuerURL is required" .Values.auth.oidc.issuerURL }}
+            - --oidc-client-id={{ .Values.auth.oidc.clientID }}
+            - --oidc-scopes={{ .Values.auth.oidc.scopes }}
+            - --oidc-username-claim={{ .Values.auth.oidc.usernameClaim }}
+            - --oidc-groups-claim={{ .Values.auth.oidc.groupsClaim }}
+            - --oidc-username-prefix={{ .Values.auth.oidc.usernamePrefix }}
+            - --oidc-groups-prefix={{ .Values.auth.oidc.groupsPrefix }}
+            {{- with .Values.auth.oidc.extraAudiences }}
+            - --oidc-extra-audiences={{ join "," . }}
+            {{- end }}
+            {{- end }}
           env:
             - name: POD_NAMESPACE
               valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            {{- if eq .Values.auth.mode "oidc" }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ .Values.auth.oidc.existingSecret | default (printf "%s-oidc" (include "kube-bmc.fullname" .)) }}, key: client-secret } }
+            - name: SESSION_SECRET
+              valueFrom: { secretKeyRef: { name: {{ .Values.auth.oidc.existingSecret | default (printf "%s-oidc" (include "kube-bmc.fullname" .)) }}, key: session-secret } }
+            {{- end }}
           ports:
             - name: http
               containerPort: 8080

@@ -1,7 +1,7 @@
-// Command kube-bmc is a single binary with two roles:
+// Command kube-bmc runs one of the two kube-bmc components:
 //
-//	kube-bmc agent   – DaemonSet; reads the local BMC in-band and publishes it as a BMC object
-//	kube-bmc server  – Deployment; serves the dashboard/API and performs out-of-band power actions
+//	kube-bmc agent   node agent (DaemonSet): reads the local BMC in-band and publishes a BMC object
+//	kube-bmc server  dashboard, API, MCP endpoint and BMCAction controller (Deployment)
 package main
 
 import (
@@ -13,27 +13,36 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/go-logr/logr"
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
-	"sigs.k8s.io/controller-runtime/pkg/cluster"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/agent"
+	"github.com/aireet/kube-bmc/internal/auth"
 	"github.com/aireet/kube-bmc/internal/collector"
+	"github.com/aireet/kube-bmc/internal/controller"
 	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/internal/mcpserver"
+	"github.com/aireet/kube-bmc/internal/oob"
 	"github.com/aireet/kube-bmc/internal/server"
 	"github.com/aireet/kube-bmc/web"
 )
 
-// version is set at build time with -ldflags "-X main.version=…".
+// version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
 func main() {
@@ -71,7 +80,9 @@ func usage() {
 func logger(level string) *slog.Logger {
 	var l slog.Level
 	_ = l.UnmarshalText([]byte(level))
-	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: l}))
+	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: l}))
+	ctrl.SetLogger(logr.FromSlogHandler(log.Handler()))
+	return log
 }
 
 func scheme() *runtime.Scheme {
@@ -81,17 +92,35 @@ func scheme() *runtime.Scheme {
 	return s
 }
 
+// envOr returns the environment variable key, or def when it is unset.
+func envOr(key, def string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	return def
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, f := range strings.Split(s, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 func runAgent(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	node := fs.String("node-name", os.Getenv("NODE_NAME"), "Kubernetes node this agent runs on (defaults to $NODE_NAME)")
-	listen := fs.String("listen", ":9580", "address for /metrics, /healthz and the snapshot API")
+	listen := fs.String("listen", ":9580", "address for /metrics, /healthz, /readyz and the snapshot API")
 	ipmitool := fs.String("ipmitool", "ipmitool", "path to the ipmitool binary")
 	cacheDir := fs.String("cache-dir", os.TempDir(), "directory for the SDR cache file")
-	interval := fs.Duration("interval", 30*time.Second, "sensor/chassis polling interval")
-	invInterval := fs.Duration("inventory-interval", 10*time.Minute, "FRU/LAN/firmware/threshold polling interval")
-	selInterval := fs.Duration("sel-min-interval", 5*time.Minute, "minimum time between SEL reads (only read when the log changed)")
-	selEntries := fs.Int("sel-entries", 100, "number of newest SEL entries to keep")
-	statusInterval := fs.Duration("status-interval", 2*time.Minute, "max time between status writes when only readings changed")
+	interval := fs.Duration("interval", 30*time.Second, "sensor and chassis polling interval")
+	invInterval := fs.Duration("inventory-interval", 10*time.Minute, "FRU, LAN, firmware and threshold polling interval")
+	selInterval := fs.Duration("sel-min-interval", 5*time.Minute, "minimum time between SEL reads; the SEL is only read after it changed")
+	selEntries := fs.Int("sel-entries", 100, "number of most recent SEL entries to keep")
+	statusInterval := fs.Duration("status-interval", 2*time.Minute, "maximum time between status writes when only readings changed")
 	logLevel := fs.String("log-level", "info", "debug, info, warn or error")
 	_ = fs.Parse(args)
 
@@ -103,7 +132,7 @@ func runAgent(ctx context.Context, args []string) error {
 		log.Warn("/dev/ipmi0 not found; load the ipmi_si and ipmi_devintf kernel modules on the host")
 	}
 
-	cfg, err := ctrlconfig.GetConfig()
+	cfg, err := ctrl.GetConfig()
 	if err != nil {
 		return err
 	}
@@ -122,73 +151,149 @@ func runAgent(ctx context.Context, args []string) error {
 
 func runServer(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("server", flag.ExitOnError)
-	listen := fs.String("listen", ":8080", "dashboard and API address")
+	listen := fs.String("listen", ":8080", "address of the dashboard, API and MCP endpoint")
 	namespace := fs.String("namespace", os.Getenv("POD_NAMESPACE"), "namespace kube-bmc runs in (defaults to $POD_NAMESPACE)")
 	agentSelector := fs.String("agent-selector", "app.kubernetes.io/name=kube-bmc,app.kubernetes.io/component=agent", "label selector of agent pods")
 	agentPort := fs.Int("agent-port", 9580, "agent HTTP port")
-	creds := fs.String("default-credentials", "", "Secret (username/password keys) used for out-of-band access when a BMC has no credentialsRef")
-	powerActions := fs.Bool("enable-power-actions", false, "allow power on/off/reset from the dashboard and API")
+	creds := fs.String("default-credentials", "", "Secret with username and password keys used for BMCs without spec.credentialsRef")
+	powerActions := fs.Bool("enable-power-actions", false, "execute BMCActions; when false they are rejected")
+	actionTimeout := fs.Duration("action-timeout", 2*time.Minute, "timeout of a single power action")
+	actionTTL := fs.Duration("action-ttl", 7*24*time.Hour, "how long finished BMCActions are kept; 0 keeps them forever")
 	staleAfter := fs.Duration("stale-after", 10*time.Minute, "mark a BMC stale when its agent has not reported for this long")
-	clusterName := fs.String("cluster-name", "", "display name of this cluster in the dashboard")
-	demo := fs.Bool("demo", false, "serve a synthetic fleet instead of connecting to Kubernetes")
+	clusterName := fs.String("cluster-name", "", "cluster name shown in the dashboard")
+	externalURL := fs.String("external-url", "", "public base URL of the dashboard, e.g. https://kube-bmc.example.com")
+	authMode := fs.String("auth", "none", "authentication mode: none or oidc")
+	kubeTokens := fs.Bool("kubernetes-tokens", true, "with --auth=oidc, also accept Kubernetes bearer tokens (TokenReview)")
+	issuer := fs.String("oidc-issuer-url", "", "OIDC issuer URL")
+	clientID := fs.String("oidc-client-id", "", "OIDC client ID")
+	clientSecret := fs.String("oidc-client-secret", "", "OIDC client secret (defaults to $OIDC_CLIENT_SECRET)")
+	scopes := fs.String("oidc-scopes", "openid,profile,email,groups", "comma-separated scopes requested at sign-in")
+	usernameClaim := fs.String("oidc-username-claim", "email", "ID token claim used as the username")
+	groupsClaim := fs.String("oidc-groups-claim", "groups", "ID token claim used as the groups")
+	usernamePrefix := fs.String("oidc-username-prefix", "oidc:", "prefix added to OIDC usernames for RBAC checks")
+	groupsPrefix := fs.String("oidc-groups-prefix", "oidc:", "prefix added to OIDC groups for RBAC checks")
+	audiences := fs.String("oidc-extra-audiences", "", "comma-separated token audiences accepted in addition to the client ID")
+	sessionSecret := fs.String("session-secret", "", "secret of at least 32 bytes that encrypts session cookies (defaults to $SESSION_SECRET)")
+	sessionTTL := fs.Duration("session-ttl", 12*time.Hour, "browser session lifetime")
 	logLevel := fs.String("log-level", "info", "debug, info, warn or error")
 	_ = fs.Parse(args)
 	log := logger(*logLevel)
 
-	var backend server.Backend
-	if *demo {
-		backend = server.NewDemo()
-		*powerActions = true
-	} else {
-		if *namespace == "" {
-			return errors.New("--namespace or $POD_NAMESPACE is required")
+	if *namespace == "" {
+		return errors.New("--namespace or $POD_NAMESPACE is required")
+	}
+	sel, err := labels.Parse(*agentSelector)
+	if err != nil {
+		return fmt.Errorf("--agent-selector: %w", err)
+	}
+	base := strings.TrimSuffix(*externalURL, "/")
+
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return err
+	}
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		Scheme:                 scheme(),
+		Metrics:                metricsserver.Options{BindAddress: "0"},
+		HealthProbeBindAddress: "0",
+		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
+			&corev1.Pod{}:    {Namespaces: map[string]cache.Config{*namespace: {}}, Label: sel},
+			&corev1.Secret{}: {Namespaces: map[string]cache.Config{*namespace: {}}},
+		}},
+	})
+	if err != nil {
+		return err
+	}
+	credentials := controller.Credentials{Reader: mgr.GetClient(), Namespace: *namespace, Default: *creds}
+	if err := (&controller.ActionReconciler{
+		Client: mgr.GetClient(), Credentials: credentials, Power: oob.Power,
+		Enabled: *powerActions, Timeout: *actionTimeout, TTL: *actionTTL,
+	}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+
+	var authz auth.Authorizer = auth.AllowAll{}
+	authOpts := auth.Options{SessionTTL: *sessionTTL, SecureCookies: strings.HasPrefix(base, "https://"), Log: log}
+	var prm http.Handler
+	switch *authMode {
+	case "none":
+		log.Warn("authentication is disabled; anyone who can reach the server can read BMC data")
+	case "oidc":
+		if base == "" {
+			return errors.New("--external-url is required with --auth=oidc")
 		}
-		sel, err := labels.Parse(*agentSelector)
-		if err != nil {
-			return fmt.Errorf("--agent-selector: %w", err)
+		secret := []byte(envOr("SESSION_SECRET", *sessionSecret))
+		if len(secret) < 32 {
+			return errors.New("--session-secret or $SESSION_SECRET of at least 32 bytes is required with --auth=oidc")
 		}
-		cfg, err := ctrlconfig.GetConfig()
-		if err != nil {
-			return err
-		}
-		cl, err := cluster.New(cfg, func(o *cluster.Options) {
-			o.Scheme = scheme()
-			o.Cache.ByObject = map[client.Object]cache.ByObject{
-				&corev1.Pod{}:    {Namespaces: map[string]cache.Config{*namespace: {}}, Label: sel},
-				&corev1.Secret{}: {Namespaces: map[string]cache.Config{*namespace: {}}},
-			}
+		o, err := auth.NewOIDC(ctx, auth.OIDCConfig{
+			IssuerURL: *issuer, ClientID: *clientID, ClientSecret: envOr("OIDC_CLIENT_SECRET", *clientSecret),
+			RedirectURL: base + "/auth/callback", Scopes: splitList(*scopes),
+			UsernameClaim: *usernameClaim, GroupsClaim: *groupsClaim,
+			UsernamePrefix: *usernamePrefix, GroupsPrefix: *groupsPrefix, ExtraAudiences: splitList(*audiences),
 		})
 		if err != nil {
 			return err
 		}
-		go func() {
-			if err := cl.Start(ctx); err != nil {
-				log.Error("cache stopped", "err", err)
-			}
-		}()
-		if !cl.GetCache().WaitForCacheSync(ctx) {
-			return errors.New("cache did not sync")
+		authOpts.OIDC, authOpts.SessionSecret = o, secret
+		if *kubeTokens {
+			authOpts.Tokens = &auth.TokenReviewer{Client: mgr.GetClient(), TTL: time.Minute}
 		}
-		backend = server.NewKube(cl.GetClient(), cl.GetClient(), server.KubeOptions{
-			Namespace: *namespace, AgentSelector: sel, AgentPort: *agentPort,
-			DefaultCredentials: *creds, StaleAfter: *staleAfter,
+		authz = &auth.RBAC{Client: mgr.GetClient(), TTL: 30 * time.Second}
+		prm = mcpauth.ProtectedResourceMetadataHandler(&oauthex.ProtectedResourceMetadata{
+			Resource:               base + "/mcp",
+			AuthorizationServers:   []string{o.Issuer()},
+			BearerMethodsSupported: []string{"header"},
+			ScopesSupported:        splitList(*scopes),
 		})
+	default:
+		return fmt.Errorf("--auth: unknown mode %q", *authMode)
+	}
+	authn, err := auth.New(authOpts)
+	if err != nil {
+		return err
+	}
+
+	backend := server.NewKube(mgr.GetClient(), server.KubeOptions{
+		Namespace: *namespace, AgentSelector: sel, AgentPort: *agentPort, Credentials: credentials, StaleAfter: *staleAfter,
+	})
+	mcpSrv := mcpserver.New(mcpserver.Options{Backend: backend, Authz: authz, PowerActions: *powerActions, Version: version})
+	var mcpHandler http.Handler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv },
+		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	if authn.Enabled() {
+		mcpHandler = mcpauth.RequireBearerToken(authn.MCPVerifier(), &mcpauth.RequireBearerTokenOptions{
+			ResourceMetadataURL: base + "/.well-known/oauth-protected-resource",
+		})(mcpHandler)
 	}
 
 	srv := &http.Server{
-		Addr:              *listen,
-		Handler:           server.New(backend, server.Config{Version: version, PowerActions: *powerActions, Demo: *demo, ClusterName: *clusterName}, web.FS(), log).Handler(),
+		Addr: *listen,
+		Handler: server.New(server.Options{
+			Backend: backend,
+			Config:  server.Config{Version: version, PowerActions: *powerActions, ClusterName: *clusterName, Login: authn.LoginEnabled()},
+			UI:      web.FS(), Authn: authn, Authz: authz, MCP: mcpHandler, ProtectedResourceMetadata: prm, Log: log,
+		}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+
+	errc := make(chan error, 2)
+	go func() { errc <- mgr.Start(ctx) }()
+	if !mgr.GetCache().WaitForCacheSync(ctx) {
+		return errors.New("informer cache did not sync")
+	}
 	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdown)
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			errc <- err
+		}
 	}()
-	log.Info("serving dashboard", "addr", *listen, "version", version, "demo", *demo, "powerActions", *powerActions)
-	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+	log.Info("serving", "addr", *listen, "version", version, "auth", *authMode, "powerActions", *powerActions)
+
+	select {
+	case <-ctx.Done():
+	case err := <-errc:
 		return err
 	}
-	return nil
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return srv.Shutdown(shutdown)
 }

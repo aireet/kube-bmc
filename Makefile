@@ -18,9 +18,13 @@ generate: ## Generate deepcopy code and the CRD, and sync it into the Helm chart
 ui: ## Build the dashboard into web/dist.
 	cd ui && npm ci --no-audit --no-fund && npm run build
 
+LDFLAGS := -s -w -X main.version=$(VERSION)
+PLUGIN_PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+
 .PHONY: build
-build: ## Build the kube-bmc binary.
-	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o bin/kube-bmc ./cmd/kube-bmc
+build: ## Build kube-bmc and kubectl-bmc into bin/.
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/kube-bmc ./cmd/kube-bmc
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/kubectl-bmc ./cmd/kubectl-bmc
 
 .PHONY: test
 test: ## Run unit tests.
@@ -31,19 +35,26 @@ lint: ## Run golangci-lint and the UI type checker.
 	golangci-lint run
 	cd ui && npm run typecheck
 
-.PHONY: demo
-demo: ui build ## Run the dashboard with a synthetic fleet on http://localhost:8080.
-	./bin/kube-bmc server --demo
-
 .PHONY: dev
-dev: ## Run the UI dev server against a demo backend (hot reload).
-	go run ./cmd/kube-bmc server --demo & cd ui && npm run dev
+dev: ## Run the UI dev server with hot reload against a port-forwarded server on :8080.
+	cd ui && KUBE_BMC_API=http://127.0.0.1:8080 npm run dev
 
 ##@ Release
 
 .PHONY: image
 image: ## Build the container image.
 	docker build --build-arg VERSION=$(VERSION) -t $(IMG) .
+
+.PHONY: plugins
+plugins: ## Cross-compile kubectl-bmc archives into dist/.
+	@mkdir -p dist
+	@for p in $(PLUGIN_PLATFORMS); do \
+		os=$${p%/*}; arch=$${p#*/}; ext=; [ $$os = windows ] && ext=.exe; \
+		out=dist/kubectl-bmc_$${os}_$${arch}; mkdir -p $$out; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o $$out/kubectl-bmc$$ext ./cmd/kubectl-bmc || exit 1; \
+		cp LICENSE $$out/; tar -C $$out -czf $$out.tar.gz . && rm -rf $$out; \
+	done
+	@cd dist && sha256sum kubectl-bmc_*.tar.gz > kubectl-bmc_checksums.txt
 
 .PHONY: manifests
 manifests: ## Render the plain-YAML install manifest.

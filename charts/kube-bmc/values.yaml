@@ -35,10 +35,15 @@ server:
   logLevel: info
   clusterName: ""
   staleAfter: 10m
-  # Power on/off/reset from the dashboard and API. Off by default: anyone who can reach the
-  # dashboard could otherwise power off servers. Put an authenticating proxy in front before enabling.
+  # Public base URL of the dashboard, e.g. https://kube-bmc.example.com. Required for OIDC.
+  externalURL: ""
+  # Execute BMCActions (power on, off, restart). When disabled, actions are recorded and rejected.
+  # Enable authentication (auth.mode=oidc) before enabling power actions.
   powerActions:
     enabled: false
+    timeout: 2m
+    # How long finished BMCActions are kept as an audit record.
+    ttl: 168h
   # Credentials for out-of-band (Redfish / IPMI-over-LAN) access, used by power actions.
   credentials:
     # Name of an existing Secret with `username` and `password` keys in the release namespace.
@@ -65,6 +70,40 @@ server:
     requests: { cpu: 10m, memory: 64Mi }
     limits: { memory: 256Mi }
   podAnnotations: {}
+
+auth:
+  # none: no authentication; every request has full access.
+  # oidc: browser sign-in with OpenID Connect; API and MCP clients send OIDC or Kubernetes
+  #       bearer tokens. Authorization uses Kubernetes RBAC (see rbac below).
+  mode: none
+  # Also accept Kubernetes bearer tokens (ServiceAccount tokens, `kubectl create token`).
+  kubernetesTokens: true
+  sessionTTL: 12h
+  oidc:
+    issuerURL: ""
+    clientID: kube-bmc
+    scopes: openid,profile,email,groups
+    usernameClaim: email
+    groupsClaim: groups
+    # Prefixes applied before RBAC checks, like the API server's --oidc-*-prefix flags.
+    usernamePrefix: "oidc:"
+    groupsPrefix: "oidc:"
+    # Additional token audiences accepted from API and MCP clients.
+    extraAudiences: []
+    # Existing Secret with the keys client-secret and session-secret (at least 32 bytes).
+    existingSecret: ""
+    # Used only when existingSecret is empty.
+    clientSecret: ""
+    sessionSecret: ""
+
+rbac:
+  # Subjects bound to the kube-bmc-viewer role (read BMCs, actions and live data).
+  # Example: [{kind: Group, name: "oidc:sre", apiGroup: rbac.authorization.k8s.io}]
+  viewers: []
+  # Subjects bound to the kube-bmc-operator role (viewer plus requesting power actions).
+  operators: []
+  # Aggregate the viewer role into the built-in "view" ClusterRole.
+  aggregateToView: true
 
 metrics:
   # Create a PodMonitor for the agents (requires the Prometheus Operator CRDs).

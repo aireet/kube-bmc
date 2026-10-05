@@ -6,8 +6,10 @@ import {
 } from 'naive-ui'
 import { MoonOutline, SunnyOutline, LogoGithub, LanguageOutline } from '@vicons/ionicons5'
 import Logo from './components/Logo.vue'
+import UserMenu from './components/UserMenu.vue'
+import SignedOut from './components/SignedOut.vue'
 import { api } from './api'
-import { config } from './store'
+import { config, me } from './store'
 import { locale, setLocale, t } from './i18n'
 
 type Mode = 'auto' | 'light' | 'dark'
@@ -52,11 +54,17 @@ const langOptions = [
   { label: '简体中文', key: 'zh' },
 ]
 
+const signedOut = new URLSearchParams(location.search).has('signed_out')
+const ready = ref(false)
+
 onMounted(async () => {
   try {
     config.value = await api.config()
+    if (!signedOut) me.value = await api.me()
   } catch {
-    /* the pages surface API errors themselves */
+    /* pages report API errors */
+  } finally {
+    ready.value = true
   }
 })
 </script>
@@ -78,7 +86,10 @@ onMounted(async () => {
               <span class="brand-name">kube-bmc</span>
             </router-link>
             <n-tag v-if="config.clusterName" size="small" round :bordered="false">{{ config.clusterName }}</n-tag>
-            <n-tag v-if="config.demo" size="small" round type="warning" :bordered="false">{{ t('demo') }}</n-tag>
+            <nav class="nav">
+              <router-link to="/" class="navlink" exact-active-class="active">{{ t('servers') }}</router-link>
+              <router-link to="/actions" class="navlink" active-class="active">{{ t('actionsNav') }}</router-link>
+            </nav>
             <div class="spacer" />
             <span v-if="config.version" class="version mono muted">{{ config.version }}</span>
             <n-dropdown :options="langOptions" :value="locale" @select="setLocale">
@@ -97,9 +108,11 @@ onMounted(async () => {
             <n-button quaternary circle tag="a" href="https://github.com/aireet/kube-bmc" target="_blank" aria-label="GitHub">
               <template #icon><LogoGithub /></template>
             </n-button>
+            <UserMenu v-if="me && me.method !== 'none'" :me="me" />
           </div>
         </header>
-        <router-view />
+        <SignedOut v-if="signedOut" />
+        <router-view v-else-if="ready" />
       </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
@@ -126,6 +139,18 @@ onMounted(async () => {
 @media (max-width: 640px) { .topbar-inner { padding: 0 12px; } .version { display: none; } }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
 .brand-name { font-weight: 650; font-size: 17px; letter-spacing: -0.01em; }
+.nav { display: flex; gap: 4px; margin-left: 14px; }
+.navlink {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-decoration: none;
+  color: var(--kb-muted);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.navlink:hover { color: var(--kb-text); background: color-mix(in srgb, var(--kb-muted) 10%, transparent); }
+.navlink.active { color: #18a058; background: color-mix(in srgb, #18a058 10%, transparent); font-weight: 600; }
+@media (max-width: 640px) { .nav { margin-left: 4px; } .navlink { padding: 6px 8px; } }
 .spacer { flex: 1; }
 .version { font-size: 12px; margin-right: 4px; }
 </style>

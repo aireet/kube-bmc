@@ -1,0 +1,102 @@
+# Roles for kube-bmc users. They govern the dashboard, the MCP endpoint and kubectl-bmc alike:
+# the server checks signed-in users against them with SubjectAccessReviews.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-bmc-viewer
+  labels:
+    {{- include "kube-bmc.labels" . | nindent 4 }}
+    {{- if .Values.rbac.aggregateToView }}
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+    {{- end }}
+rules:
+  - apiGroups: ["bmc.kube-bmc.io"]
+    resources: ["bmcs", "bmcactions"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-bmc-operator
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["bmc.kube-bmc.io"]
+    resources: ["bmcs", "bmcactions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["bmc.kube-bmc.io"]
+    resources: ["bmcactions"]
+    verbs: ["create"]
+---
+# Live sensor and event data is read from the agents through the API server's pod proxy
+# (kubectl bmc sensors/events). This is granted in the kube-bmc namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kube-bmc-agent-proxy
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods/proxy"]
+    verbs: ["get"]
+{{- range $role, $subjects := dict "viewer" .Values.rbac.viewers "operator" .Values.rbac.operators }}
+{{- if $subjects }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-bmc-{{ $role }}
+  labels: {{- include "kube-bmc.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-bmc-{{ $role }}
+subjects: {{- toYaml $subjects | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kube-bmc-{{ $role }}-agent-proxy
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kube-bmc-agent-proxy
+subjects: {{- toYaml $subjects | nindent 2 }}
+{{- end }}
+{{- end }}
+---
+# spec.requestedBy must be the authenticated user. Only the kube-bmc server, which
+# authenticates dashboard and MCP users itself, may create actions on behalf of others.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kube-bmc-bmcaction-requester
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["bmc.kube-bmc.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE"]
+        resources: ["bmcactions"]
+  validations:
+    - expression: >-
+        request.userInfo.username == "system:serviceaccount:{{ .Release.Namespace }}:{{ include "kube-bmc.fullname" . }}-server" ||
+        object.spec.requestedBy == request.userInfo.username
+      messageExpression: >-
+        "spec.requestedBy must be your username (" + request.userInfo.username + ")"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kube-bmc-bmcaction-requester
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+spec:
+  policyName: kube-bmc-bmcaction-requester
+  validationActions: [Deny]

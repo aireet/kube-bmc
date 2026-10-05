@@ -98,8 +98,8 @@ spec:
                 type: object
               insecureSkipVerify:
                 default: true
-                description: InsecureSkipVerify disables TLS verification for Redfish.
-                  Most BMCs ship self-signed certificates.
+                description: InsecureSkipVerify disables TLS certificate verification
+                  for Redfish.
                 type: boolean
               nodeName:
                 description: NodeName is the Kubernetes node this BMC belongs to.

@@ -1,6 +1,6 @@
 import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 
-/** Polls fn every `ms` while the page is visible. Errors are kept, the last good data stays. */
+/** Polls fn every `ms` (less often while the page is hidden). The last successful result is kept on error. */
 export function usePoll<T>(fn: () => Promise<T>, ms: number) {
   const data = ref<T>() as Ref<T | undefined>
   const error = ref<string>()

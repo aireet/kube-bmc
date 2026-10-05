@@ -18,6 +18,6 @@ linters:
     presets: [comments, std-error-handling]
     rules:
       - path: _test\.go
-        linters: [noctx]
+        linters: [noctx, unparam]
 formatters:
   enable: [gofmt, goimports]

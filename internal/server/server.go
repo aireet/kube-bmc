@@ -1,4 +1,4 @@
-// Package server serves the kube-bmc dashboard and its JSON API.
+// Package server serves the kube-bmc dashboard, its JSON API and the MCP endpoint.
 package server
 
 import (
@@ -7,19 +7,18 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
-	"net"
+	"mime"
 	"net/http"
 	"strings"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
+	"github.com/aireet/kube-bmc/internal/auth"
 	"github.com/aireet/kube-bmc/internal/collector"
-	"github.com/aireet/kube-bmc/internal/oob"
 )
 
-// NodeInfo is the Kubernetes side of a server.
+// NodeInfo is the Kubernetes view of a server.
 type NodeInfo struct {
 	Ready          bool     `json:"ready"`
 	Unschedulable  bool     `json:"unschedulable"`
@@ -34,14 +33,14 @@ type NodeInfo struct {
 	GPUModel       string   `json:"gpuModel,omitempty"`
 }
 
-// AgentInfo is the node agent pod for a server.
+// AgentInfo describes the node agent pod of a server.
 type AgentInfo struct {
 	Pod   string `json:"pod"`
 	IP    string `json:"ip"`
 	Ready bool   `json:"ready"`
 }
 
-// View joins a BMC with its Node and agent, which is what the dashboard needs per server.
+// View joins a BMC with its Node and agent.
 type View struct {
 	Name    string          `json:"name"`
 	Created metav1.Time     `json:"created"`
@@ -49,152 +48,224 @@ type View struct {
 	Status  bmcv1.BMCStatus `json:"status"`
 	Node    *NodeInfo       `json:"node,omitempty"`
 	Agent   *AgentInfo      `json:"agent,omitempty"`
-	// Stale is true when the agent has not reported for a while; the status may be outdated.
+	// Stale is set when the agent has not reported within the configured window.
 	Stale bool `json:"stale"`
-	// OOBConfigured is true when credentials for out-of-band access are available.
+	// OOBConfigured is set when out-of-band credentials are available for this BMC.
 	OOBConfigured bool `json:"oobConfigured"`
 }
 
+// ErrNotFound is returned by a Backend for unknown objects.
 var ErrNotFound = errors.New("not found")
 
-// Backend is where views come from: a live cluster or the built-in demo fleet.
+// Backend provides BMC data and accepts power action requests.
 type Backend interface {
 	List(ctx context.Context) ([]View, error)
 	Get(ctx context.Context, name string) (View, error)
 	Live(ctx context.Context, name string) (*collector.Snapshot, error)
-	PowerState(ctx context.Context, name string) (bmcv1.PowerState, error)
-	Power(ctx context.Context, name string, a oob.Action, actor string) error
+	CreateAction(ctx context.Context, req ActionRequest) (*bmcv1.BMCAction, error)
+	// ListActions returns actions newest first, optionally filtered by BMC name.
+	ListActions(ctx context.Context, bmc string) ([]bmcv1.BMCAction, error)
+	GetAction(ctx context.Context, name string) (*bmcv1.BMCAction, error)
 }
 
+// ActionRequest is a validated request to create a BMCAction.
+type ActionRequest struct {
+	BMC         string
+	Action      bmcv1.PowerAction
+	RequestedBy string
+	Reason      string
+}
+
+// Config is exposed to the dashboard.
 type Config struct {
 	Version      string `json:"version"`
 	PowerActions bool   `json:"powerActions"`
-	Demo         bool   `json:"demo"`
 	ClusterName  string `json:"clusterName,omitempty"`
+	// Login is true when browser sign-in through OIDC is available.
+	Login bool `json:"login"`
 }
 
-type Server struct {
-	backend Backend
-	cfg     Config
-	ui      fs.FS
-	log     *slog.Logger
+// Authenticator establishes request identities and implements browser sign-in.
+type Authenticator interface {
+	// Middleware stores the caller identity in the request context or rejects the request.
+	Middleware(http.Handler) http.Handler
+	Login(http.ResponseWriter, *http.Request)
+	Callback(http.ResponseWriter, *http.Request)
+	Logout(http.ResponseWriter, *http.Request)
 }
 
-func New(b Backend, cfg Config, ui fs.FS, log *slog.Logger) *Server {
-	return &Server{backend: b, cfg: cfg, ui: ui, log: log}
+// Options configures a Server.
+type Options struct {
+	Backend Backend
+	Config  Config
+	UI      fs.FS
+	Authn   Authenticator
+	Authz   auth.Authorizer
+	// MCP is mounted at /mcp when set.
+	MCP http.Handler
+	// ProtectedResourceMetadata is served at /.well-known/oauth-protected-resource when set.
+	ProtectedResourceMetadata http.Handler
+	Log                       *slog.Logger
 }
+
+type Server struct{ Options }
+
+func New(o Options) *Server { return &Server{o} }
 
 func (s *Server) Handler() http.Handler {
+	api := http.NewServeMux()
+	api.HandleFunc("GET /api/v1/me", s.me)
+	api.HandleFunc("GET /api/v1/bmcs", s.require(auth.Read, s.list))
+	api.HandleFunc("GET /api/v1/bmcs/{name}", s.require(auth.Read, s.get))
+	api.HandleFunc("GET /api/v1/bmcs/{name}/live", s.require(auth.Read, s.live))
+	api.HandleFunc("POST /api/v1/bmcs/{name}/power", s.require(auth.Operate, s.power))
+	api.HandleFunc("GET /api/v1/actions", s.require(auth.Read, s.listActions))
+	api.HandleFunc("GET /api/v1/actions/{name}", s.require(auth.Read, s.getAction))
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-	mux.HandleFunc("GET /api/v1/config", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, s.cfg) })
-	mux.HandleFunc("GET /api/v1/bmcs", s.list)
-	mux.HandleFunc("GET /api/v1/bmcs/{name}", s.get)
-	mux.HandleFunc("GET /api/v1/bmcs/{name}/live", s.live)
-	mux.HandleFunc("GET /api/v1/bmcs/{name}/power", s.powerState)
-	mux.HandleFunc("POST /api/v1/bmcs/{name}/power", s.power)
-	mux.Handle("/", spa(s.ui))
-	return logRequests(s.log, mux)
+	mux.HandleFunc("GET /api/v1/config", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, s.Config) })
+	mux.Handle("/api/", s.Authn.Middleware(api))
+	mux.HandleFunc("GET /auth/login", s.Authn.Login)
+	mux.HandleFunc("GET /auth/callback", s.Authn.Callback)
+	mux.HandleFunc("GET /auth/logout", s.Authn.Logout)
+	if s.MCP != nil {
+		mux.Handle("/mcp", s.MCP)
+	}
+	if s.ProtectedResourceMetadata != nil {
+		mux.Handle("GET /.well-known/oauth-protected-resource", s.ProtectedResourceMetadata)
+	}
+	mux.Handle("/", spa(s.UI))
+	return mux
+}
+
+// require wraps h with an authorization check for p.
+func (s *Server) require(p auth.Permission, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, _ := auth.FromContext(r.Context())
+		ok, err := s.Authz.Authorize(r.Context(), id, p)
+		if err != nil {
+			s.Log.Error("authorization failed", "user", id.Username, "permission", p, "err", err)
+			writeError(w, http.StatusInternalServerError, "authorization check failed")
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusForbidden, forbiddenMessage(id, p))
+			return
+		}
+		h(w, r)
+	}
+}
+
+func forbiddenMessage(id auth.Identity, p auth.Permission) string {
+	if p == auth.Operate {
+		return id.Username + " is not allowed to create bmcactions.bmc.kube-bmc.io"
+	}
+	return id.Username + " is not allowed to list bmcs.bmc.kube-bmc.io"
+}
+
+type meResponse struct {
+	auth.Identity
+	CanRead    bool `json:"canRead"`
+	CanOperate bool `json:"canOperate"`
+}
+
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	read, err1 := s.Authz.Authorize(r.Context(), id, auth.Read)
+	operate, err2 := s.Authz.Authorize(r.Context(), id, auth.Operate)
+	if err := errors.Join(err1, err2); err != nil {
+		s.Log.Error("authorization failed", "user", id.Username, "err", err)
+	}
+	writeJSON(w, http.StatusOK, meResponse{Identity: id, CanRead: read, CanOperate: operate})
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
-	views, err := s.backend.List(r.Context())
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, views)
+	views, err := s.Backend.List(r.Context())
+	respond(w, views, err)
 }
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
-	v, err := s.backend.Get(r.Context(), r.PathValue("name"))
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, v)
+	v, err := s.Backend.Get(r.Context(), r.PathValue("name"))
+	respond(w, v, err)
 }
 
 func (s *Server) live(w http.ResponseWriter, r *http.Request) {
-	snap, err := s.backend.Live(r.Context(), r.PathValue("name"))
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, snap)
+	snap, err := s.Backend.Live(r.Context(), r.PathValue("name"))
+	respond(w, snap, err)
 }
 
-func (s *Server) powerState(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	st, err := s.backend.PowerState(ctx, r.PathValue("name"))
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, map[string]any{"powerState": st})
+func (s *Server) listActions(w http.ResponseWriter, r *http.Request) {
+	actions, err := s.Backend.ListActions(r.Context(), r.URL.Query().Get("bmc"))
+	respond(w, actions, err)
+}
+
+func (s *Server) getAction(w http.ResponseWriter, r *http.Request) {
+	a, err := s.Backend.GetAction(r.Context(), r.PathValue("name"))
+	respond(w, a, err)
 }
 
 type powerRequest struct {
-	Action oob.Action `json:"action"`
-	// Confirm must repeat the BMC name, so a stray click or a replayed request can't power off the wrong host.
+	Action bmcv1.PowerAction `json:"action"`
+	// Confirm must equal the BMC name.
 	Confirm string `json:"confirm"`
+	Reason  string `json:"reason"`
 }
 
 func (s *Server) power(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if !s.cfg.PowerActions {
-		httpError(w, http.StatusForbidden, "power actions are disabled; start the server with --enable-power-actions")
+	if !s.Config.PowerActions {
+		writeError(w, http.StatusForbidden, "power actions are disabled on this kube-bmc server")
+		return
+	}
+	// Requiring a JSON content type prevents cross-site form submissions from using
+	// the session cookie, because browsers preflight such requests.
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		writeError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
 		return
 	}
 	var req powerRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if !req.Action.Valid() {
-		httpError(w, http.StatusBadRequest, "unknown action "+string(req.Action))
+		writeError(w, http.StatusBadRequest, "unsupported action "+string(req.Action))
 		return
 	}
 	if req.Confirm != name {
-		httpError(w, http.StatusBadRequest, "confirm must equal the BMC name")
+		writeError(w, http.StatusBadRequest, "confirm must equal the BMC name")
 		return
 	}
-	actor := actorOf(r)
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-	if err := s.backend.Power(ctx, name, req.Action, actor); err != nil {
-		s.log.Error("power action failed", "bmc", name, "action", req.Action, "actor", actor, "err", err)
-		writeErr(w, err)
+	id, _ := auth.FromContext(r.Context())
+	a, err := s.Backend.CreateAction(r.Context(), ActionRequest{BMC: name, Action: req.Action, RequestedBy: id.Username, Reason: req.Reason})
+	if err != nil {
+		writeBackendError(w, err)
 		return
 	}
-	s.log.Info("power action executed", "bmc", name, "action", req.Action, "actor", actor)
-	writeJSON(w, map[string]string{"result": "accepted"})
+	s.Log.Info("power action requested", "bmc", name, "action", req.Action, "user", id.Username, "bmcaction", a.Name)
+	writeJSON(w, http.StatusAccepted, a)
 }
 
-// actorOf identifies who triggered an action, trusting headers set by an auth proxy such as oauth2-proxy.
-func actorOf(r *http.Request) string {
-	for _, h := range []string{"X-Auth-Request-Email", "X-Auth-Request-User", "X-Forwarded-Email", "X-Forwarded-User", "X-Remote-User"} {
-		if v := r.Header.Get(h); v != "" {
-			return v
-		}
+func respond(w http.ResponseWriter, v any, err error) {
+	if err != nil {
+		writeBackendError(w, err)
+		return
 	}
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return "anonymous@" + host
+	writeJSON(w, http.StatusOK, v)
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func httpError(w http.ResponseWriter, code int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+func writeError(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-func writeErr(w http.ResponseWriter, err error) {
+func writeBackendError(w http.ResponseWriter, err error) {
 	code := http.StatusBadGateway
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -202,10 +273,10 @@ func writeErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, context.DeadlineExceeded):
 		code = http.StatusGatewayTimeout
 	}
-	httpError(w, code, err.Error())
+	writeError(w, code, err.Error())
 }
 
-// spa serves the embedded UI and falls back to index.html for client-side routes.
+// spa serves the embedded dashboard and falls back to index.html for client-side routes.
 func spa(ui fs.FS) http.Handler {
 	files := http.FileServerFS(ui)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -221,15 +292,5 @@ func spa(ui fs.FS) http.Handler {
 		}
 		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFileFS(w, r, ui, "index.html")
-	})
-}
-
-func logRequests(log *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			log.Debug("request", "method", r.Method, "path", r.URL.Path, "took", time.Since(start))
-		}
 	})
 }

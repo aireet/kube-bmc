@@ -45,7 +45,7 @@ var sevValue = map[ipmi.Severity]float64{
 	ipmi.SeverityOK: 0, ipmi.SeverityWarning: 1, ipmi.SeverityCritical: 2, ipmi.SeverityNoReading: -1,
 }
 
-// Metrics exposes the latest snapshot. Values are computed at scrape time, so no series go stale.
+// Metrics exports the latest snapshot. Values are computed at scrape time.
 type Metrics struct{ C *Collector }
 
 // NewRegistry returns a registry where every metric carries a constant `node` label,
@@ -86,7 +86,7 @@ func (m Metrics) Collect(ch chan<- prometheus.Metric) {
 	gauge(descInfo, 1, s.FRU.Manufacturer, s.FRU.Product, s.FRU.SerialNumber, s.MC.FirmwareVersion, s.LAN.IPAddress, s.LAN.MACAddress)
 	seen := map[string]bool{}
 	for _, sn := range s.Sensors {
-		if seen[sn.Name] { // duplicate SDR names exist on some BMCs and would break the registry
+		if seen[sn.Name] { // some BMCs report duplicate sensor names
 			continue
 		}
 		seen[sn.Name] = true

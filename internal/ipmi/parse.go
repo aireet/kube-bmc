@@ -166,8 +166,8 @@ func severityOf(status string) Severity {
 	return SeverityOK
 }
 
-// Discrete sensors keep status "ok" while asserting a failure state, so the state text is the
-// only signal. Order matters: the first match wins.
+// discreteRules classify discrete sensors, which report status "ok" even while asserting a
+// failure state. The first matching rule applies.
 var discreteRules = []struct {
 	words []string
 	sev   Severity
@@ -179,7 +179,7 @@ var discreteRules = []struct {
 // DiscreteSeverity classifies the state text of a discrete sensor.
 func DiscreteSeverity(reading string) Severity {
 	r := strings.ToLower(reading)
-	// "Predictive failure" contains "failure"; check warnings that would otherwise match a critical word first.
+	// "Predictive failure" would otherwise match the critical rule for "failure".
 	if strings.Contains(r, "predictive failure") {
 		return SeverityWarning
 	}

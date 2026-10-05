@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-// `npm run dev` proxies the API to a local `kube-bmc server --demo` (or a port-forwarded server).
+// The dev server proxies /api, /auth and /mcp to KUBE_BMC_API, e.g. a port-forwarded kube-bmc server.
 export default defineConfig({
   plugins: [vue()],
   build: {
@@ -10,6 +10,6 @@ export default defineConfig({
     chunkSizeWarningLimit: 1200,
   },
   server: {
-    proxy: { '/api': process.env.KUBE_BMC_API ?? 'http://127.0.0.1:8080' },
+    proxy: Object.fromEntries(['/api', '/auth', '/mcp'].map((p) => [p, process.env.KUBE_BMC_API ?? 'http://127.0.0.1:8080'])),
   },
 })

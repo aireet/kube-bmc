@@ -19,45 +19,47 @@ import (
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/collector"
-	"github.com/aireet/kube-bmc/internal/oob"
+	"github.com/aireet/kube-bmc/internal/controller"
 )
 
+// maxActions bounds the number of actions returned by ListActions.
+const maxActions = 100
+
+// KubeOptions configures the Kubernetes backend.
 type KubeOptions struct {
-	// Namespace kube-bmc runs in; agent pods and credential Secrets live here.
+	// Namespace kube-bmc runs in; agent pods live here.
 	Namespace     string
 	AgentSelector labels.Selector
 	AgentPort     int
-	// DefaultCredentials is the Secret used when a BMC has no spec.credentialsRef.
-	DefaultCredentials string
-	StaleAfter         time.Duration
+	Credentials   controller.Credentials
+	StaleAfter    time.Duration
 }
 
-// Kube reads BMCs, Nodes and agent Pods through an informer-backed client.
+// Kube is the Backend for a live cluster. Reads go through an informer cache.
 type Kube struct {
-	cache  client.Reader // informer cache
-	direct client.Client // uncached, for Secrets and writes
+	client client.Client
 	opts   KubeOptions
 	http   *http.Client
 }
 
-func NewKube(cache client.Reader, direct client.Client, opts KubeOptions) *Kube {
-	return &Kube{cache: cache, direct: direct, opts: opts, http: &http.Client{Timeout: 10 * time.Second}}
+func NewKube(c client.Client, opts KubeOptions) *Kube {
+	return &Kube{client: c, opts: opts, http: &http.Client{Timeout: 10 * time.Second}}
 }
 
 func (k *Kube) List(ctx context.Context) ([]View, error) {
 	var bmcs bmcv1.BMCList
-	if err := k.cache.List(ctx, &bmcs); err != nil {
+	if err := k.client.List(ctx, &bmcs); err != nil {
 		return nil, err
 	}
 	var nodes corev1.NodeList
-	if err := k.cache.List(ctx, &nodes); err != nil {
+	if err := k.client.List(ctx, &nodes); err != nil {
 		return nil, err
 	}
 	pods, err := k.agents(ctx)
 	if err != nil {
 		return nil, err
 	}
-	byNode := map[string]*corev1.Node{}
+	byNode := make(map[string]*corev1.Node, len(nodes.Items))
 	for i := range nodes.Items {
 		byNode[nodes.Items[i].Name] = &nodes.Items[i]
 	}
@@ -77,7 +79,7 @@ func (k *Kube) Get(ctx context.Context, name string) (View, error) {
 	}
 	var node *corev1.Node
 	n := &corev1.Node{}
-	if err := k.cache.Get(ctx, client.ObjectKey{Name: b.Spec.NodeName}, n); err == nil {
+	if err := k.client.Get(ctx, client.ObjectKey{Name: b.Spec.NodeName}, n); err == nil {
 		node = n
 	}
 	pods, err := k.agents(ctx)
@@ -120,27 +122,52 @@ func (k *Kube) Live(ctx context.Context, name string) (*collector.Snapshot, erro
 	return &snap, nil
 }
 
-func (k *Kube) PowerState(ctx context.Context, name string) (bmcv1.PowerState, error) {
-	t, _, err := k.target(ctx, name)
-	if err != nil {
-		return bmcv1.PowerUnknown, err
+func (k *Kube) CreateAction(ctx context.Context, req ActionRequest) (*bmcv1.BMCAction, error) {
+	if _, err := k.bmc(ctx, req.BMC); err != nil {
+		return nil, err
 	}
-	return oob.PowerState(ctx, t)
+	a := &bmcv1.BMCAction{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: req.BMC + "-" + strings.ToLower(string(req.Action)) + "-",
+			Labels:       map[string]string{"bmc.kube-bmc.io/bmc": req.BMC},
+		},
+		Spec: bmcv1.BMCActionSpec{BMCName: req.BMC, Action: req.Action, RequestedBy: req.RequestedBy, Reason: req.Reason},
+	}
+	if err := k.client.Create(ctx, a); err != nil {
+		return nil, fmt.Errorf("create BMCAction: %w", err)
+	}
+	return a, nil
 }
 
-func (k *Kube) Power(ctx context.Context, name string, a oob.Action, actor string) error {
-	t, b, err := k.target(ctx, name)
-	if err != nil {
-		return err
+func (k *Kube) ListActions(ctx context.Context, bmc string) ([]bmcv1.BMCAction, error) {
+	var list bmcv1.BMCActionList
+	if err := k.client.List(ctx, &list); err != nil {
+		return nil, err
 	}
-	err = oob.Power(ctx, t, a)
-	k.event(ctx, b, a, actor, err)
-	return err
+	items := slices.DeleteFunc(list.Items, func(a bmcv1.BMCAction) bool { return bmc != "" && a.Spec.BMCName != bmc })
+	slices.SortFunc(items, func(a, b bmcv1.BMCAction) int {
+		return b.CreationTimestamp.Compare(a.CreationTimestamp.Time)
+	})
+	if len(items) > maxActions {
+		items = items[:maxActions]
+	}
+	return items, nil
+}
+
+func (k *Kube) GetAction(ctx context.Context, name string) (*bmcv1.BMCAction, error) {
+	a := &bmcv1.BMCAction{}
+	if err := k.client.Get(ctx, client.ObjectKey{Name: name}, a); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("bmcaction %s: %w", name, ErrNotFound)
+		}
+		return nil, err
+	}
+	return a, nil
 }
 
 func (k *Kube) bmc(ctx context.Context, name string) (*bmcv1.BMC, error) {
 	b := &bmcv1.BMC{}
-	if err := k.cache.Get(ctx, client.ObjectKey{Name: name}, b); err != nil {
+	if err := k.client.Get(ctx, client.ObjectKey{Name: name}, b); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("bmc %s: %w", name, ErrNotFound)
 		}
@@ -149,10 +176,10 @@ func (k *Kube) bmc(ctx context.Context, name string) (*bmcv1.BMC, error) {
 	return b, nil
 }
 
-// agents returns the agent pod per node name.
+// agents returns the running agent pod for each node.
 func (k *Kube) agents(ctx context.Context) (map[string]*corev1.Pod, error) {
 	var pods corev1.PodList
-	if err := k.cache.List(ctx, &pods, client.InNamespace(k.opts.Namespace),
+	if err := k.client.List(ctx, &pods, client.InNamespace(k.opts.Namespace),
 		client.MatchingLabelsSelector{Selector: k.opts.AgentSelector}); err != nil {
 		return nil, err
 	}
@@ -178,60 +205,9 @@ func (k *Kube) view(ctx context.Context, b *bmcv1.BMC, node *corev1.Node, pod *c
 	if pod != nil {
 		v.Agent = &AgentInfo{Pod: pod.Name, IP: pod.Status.PodIP, Ready: podReady(pod)}
 	}
-	_, err := k.credentials(ctx, b)
+	_, err := k.opts.Credentials.For(ctx, b)
 	v.OOBConfigured = err == nil
 	return v
-}
-
-func (k *Kube) target(ctx context.Context, name string) (oob.Target, *bmcv1.BMC, error) {
-	b, err := k.bmc(ctx, name)
-	if err != nil {
-		return oob.Target{}, nil, err
-	}
-	creds, err := k.credentials(ctx, b)
-	if err != nil {
-		return oob.Target{}, nil, err
-	}
-	t, err := oob.TargetFor(b, creds)
-	return t, b, err
-}
-
-// credentials reads the BMC's Secret. Secrets must live in the kube-bmc namespace: the server is
-// deliberately not granted cluster-wide Secret access.
-func (k *Kube) credentials(ctx context.Context, b *bmcv1.BMC) (oob.Credentials, error) {
-	name := k.opts.DefaultCredentials
-	if ref := b.Spec.CredentialsRef; ref != nil && ref.Name != "" {
-		name = ref.Name
-	}
-	if name == "" {
-		return oob.Credentials{}, fmt.Errorf("no credentials configured for %s", b.Name)
-	}
-	s := &corev1.Secret{}
-	if err := k.cache.Get(ctx, client.ObjectKey{Namespace: k.opts.Namespace, Name: name}, s); err != nil {
-		return oob.Credentials{}, fmt.Errorf("credentials secret %s/%s: %w", k.opts.Namespace, name, err)
-	}
-	c := oob.Credentials{Username: string(s.Data["username"]), Password: string(s.Data["password"])}
-	if c.Username == "" {
-		return c, fmt.Errorf("secret %s/%s has no username key", k.opts.Namespace, name)
-	}
-	return c, nil
-}
-
-// event records every power action on the Node, so it shows up in `kubectl describe node`.
-func (k *Kube) event(ctx context.Context, b *bmcv1.BMC, a oob.Action, actor string, actionErr error) {
-	typ, reason, msg := corev1.EventTypeNormal, "BMCPowerAction", fmt.Sprintf("%s requested %s via kube-bmc", actor, a)
-	if actionErr != nil {
-		typ, reason, msg = corev1.EventTypeWarning, "BMCPowerActionFailed", msg+": "+actionErr.Error()
-	}
-	now := metav1.Now()
-	ev := &corev1.Event{
-		ObjectMeta:     metav1.ObjectMeta{GenerateName: b.Spec.NodeName + ".", Namespace: metav1.NamespaceDefault},
-		InvolvedObject: corev1.ObjectReference{Kind: "Node", Name: b.Spec.NodeName, APIVersion: "v1"},
-		Reason:         reason, Message: msg, Type: typ,
-		Source:         corev1.EventSource{Component: "kube-bmc"},
-		FirstTimestamp: now, LastTimestamp: now, Count: 1,
-	}
-	_ = k.direct.Create(ctx, ev)
 }
 
 func nodeInfo(n *corev1.Node) *NodeInfo {
@@ -241,7 +217,7 @@ func nodeInfo(n *corev1.Node) *NodeInfo {
 		OSImage:        n.Status.NodeInfo.OSImage,
 		KernelVersion:  n.Status.NodeInfo.KernelVersion,
 		CPU:            n.Status.Capacity.Cpu().String(),
-		Memory:         humanBytes(n.Status.Capacity.Memory().Value()),
+		Memory:         gibibytes(n.Status.Capacity.Memory().Value()),
 		GPUModel:       n.Labels["nvidia.com/gpu.product"],
 	}
 	for _, c := range n.Status.Conditions {
@@ -278,7 +254,7 @@ func podReady(p *corev1.Pod) bool {
 	return false
 }
 
-func humanBytes(b int64) string {
+func gibibytes(b int64) string {
 	const gi = 1 << 30
 	return fmt.Sprintf("%d Gi", (b+gi/2)/gi)
 }

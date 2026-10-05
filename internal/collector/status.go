@@ -6,8 +6,8 @@ import (
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 )
 
-// Status converts a snapshot into the BMC custom resource status. It is deterministic so
-// callers can compare results to skip no-op API writes.
+// Status converts a snapshot into a BMC status. The result is deterministic, so callers
+// can compare results to skip unnecessary writes.
 func Status(s *Snapshot) bmcv1.BMCStatus {
 	health, sum, problems := Evaluate(s)
 	st := bmcv1.BMCStatus{

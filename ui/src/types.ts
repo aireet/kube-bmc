@@ -105,9 +105,34 @@ export interface Snapshot {
 export interface Config {
   version: string
   powerActions: boolean
-  demo: boolean
   clusterName?: string
+  login: boolean
+}
+
+export interface Me {
+  username: string
+  groups?: string[]
+  email?: string
+  name?: string
+  method: 'none' | 'session' | 'oidc-token' | 'kubernetes'
+  canRead: boolean
+  canOperate: boolean
 }
 
 export const powerActions = ['On', 'GracefulShutdown', 'GracefulRestart', 'ForceRestart', 'PowerCycle', 'ForceOff'] as const
 export type PowerAction = (typeof powerActions)[number]
+export type ActionPhase = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Rejected'
+
+export interface BMCAction {
+  metadata: { name: string; creationTimestamp: string }
+  spec: { bmcName: string; action: PowerAction; requestedBy: string; reason?: string }
+  status?: {
+    phase?: ActionPhase
+    message?: string
+    powerStateBefore?: PowerState
+    startTime?: string
+    completionTime?: string
+  }
+}
+
+export const phaseDone = (p?: ActionPhase) => p === 'Succeeded' || p === 'Failed' || p === 'Rejected'

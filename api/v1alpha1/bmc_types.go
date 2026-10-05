@@ -73,7 +73,7 @@ type BMCSpec struct {
 	// +optional
 	CredentialsRef *SecretReference `json:"credentialsRef,omitempty"`
 
-	// InsecureSkipVerify disables TLS verification for Redfish. Most BMCs ship self-signed certificates.
+	// InsecureSkipVerify disables TLS certificate verification for Redfish.
 	// +kubebuilder:default=true
 	// +optional
 	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`

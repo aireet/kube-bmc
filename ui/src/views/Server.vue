@@ -16,6 +16,7 @@ import InfoCard from '../components/InfoCard.vue'
 import SensorPanel from '../components/SensorPanel.vue'
 import EventTable from '../components/EventTable.vue'
 import PowerMenu from '../components/PowerMenu.vue'
+import ActionTable from '../components/ActionTable.vue'
 
 const props = defineProps<{ name: string }>()
 const route = useRoute()
@@ -27,6 +28,7 @@ const tab = computed({
 
 const view = usePoll(() => api.get(props.name), 10000)
 const live = usePoll(() => api.live(props.name), 10000)
+const actions = usePoll(() => api.actions(props.name), 10000)
 
 const v = computed(() => view.data.value)
 const s = computed(() => v.value?.status ?? {})
@@ -83,7 +85,7 @@ const selColor = computed(() => {
           <n-button v-if="s.network?.ipAddress" tag="a" :href="bmcURL(s.network.ipAddress)" target="_blank" secondary>
             <template #icon><n-icon :component="OpenOutline" /></template>{{ t('openBMC') }}
           </n-button>
-          <PowerMenu :v="v" @done="view.refresh" />
+          <PowerMenu :v="v" @done="() => { view.refresh(); actions.refresh() }" />
         </div>
       </section>
 
@@ -172,6 +174,12 @@ const selColor = computed(() => {
           <n-skeleton v-else-if="!snap" text :repeat="8" />
           <div v-else-if="!snap.events?.length" class="muted noev">{{ t('noEvents') }}</div>
           <EventTable v-else :events="snap.events" />
+        </n-tab-pane>
+
+        <n-tab-pane name="actions" :tab="`${t('actionsNav')}${actions.data.value?.length ? ` · ${actions.data.value.length}` : ''}`">
+          <n-alert v-if="actions.error.value && !actions.data.value" type="error" :bordered="false">{{ actions.error.value }}</n-alert>
+          <div v-else-if="!actions.data.value?.length" class="muted noev">{{ t('noActions') }}</div>
+          <ActionTable v-else :actions="actions.data.value" />
         </n-tab-pane>
 
         <n-tab-pane name="resource" :tab="t('raw')">

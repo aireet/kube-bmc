@@ -40,7 +40,7 @@ func TestEvaluateRealServer(t *testing.T) {
 	if sum.Total != 219 || sum.Critical != 5 || sum.Warning != 2 || sum.NoReading != 39 || sum.OK != 173 {
 		t.Fatalf("summary = %+v", sum)
 	}
-	// 5 dead fans + chassis fan fault, then inlet temperature, SEL_Status sensor and SEL usage.
+	// Five fans below lnr and the chassis fan fault, then inlet temperature, SEL_Status and SEL usage.
 	if len(problems) != 9 {
 		t.Fatalf("got %d problems: %+v", len(problems), problems)
 	}

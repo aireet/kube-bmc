@@ -8,12 +8,13 @@ Prerequisites: Go 1.26+, Node.js 22+, and optionally Docker, Helm and a cluster 
 
 ```bash
 git clone https://github.com/aireet/kube-bmc && cd kube-bmc
-make demo    # dashboard with a synthetic fleet on http://localhost:8080
+make ui build   # dashboard and binaries
 make test
 make lint
 ```
 
-The UI lives in `ui/` (Vue 3 + Naive UI + TypeScript). `make dev` runs Vite with hot reload against a demo backend.
+The dashboard lives in `ui/` (Vue 3, Naive UI, TypeScript). To work on it, port-forward a running
+kube-bmc server to `localhost:8080` and run `make dev`, which starts Vite with hot reload.
 
 ## Hardware fixtures
 

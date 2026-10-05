@@ -112,7 +112,7 @@ func TestParseSDR(t *testing.T) {
 		count[s.Severity]++
 		byName[s.Name] = s
 	}
-	// 5 fans at lnr; warnings: Inlet_Temp (unc) and SEL_Status "Log full" (discrete).
+	// Five fans below lnr; warnings are Inlet_Temp (unc) and SEL_Status "Log full" (discrete).
 	if count[SeverityCritical] != 5 || count[SeverityWarning] != 2 || count[SeverityNoReading] != 39 {
 		t.Fatalf("severity counts = %v", count)
 	}
