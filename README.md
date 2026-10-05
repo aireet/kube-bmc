@@ -27,6 +27,18 @@
 
 ![Dashboard](docs/images/fleet.png)
 
+<details>
+<summary>More screenshots</summary>
+
+| Server details | Sensors |
+|---|---|
+| ![Server details](docs/images/server.png) | ![Sensors](docs/images/sensors.png) |
+| **System event log** (decoded failed BMC logins) | **Power actions** |
+| ![Event log](docs/images/events.png) | ![Power actions](docs/images/actions.png) |
+
+Screenshots show real servers; addresses and serial numbers are replaced.
+</details>
+
 ## Overview
 
 kube-bmc runs an agent on every node that reads the local BMC through the in-band IPMI
