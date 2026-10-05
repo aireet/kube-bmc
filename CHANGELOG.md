@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- In-band power control: the agent of the target node executes `GracefulShutdown`, `ForceOff`,
+  `ForceRestart` and `PowerCycle` through `/dev/ipmi0`, without BMC credentials or network access
+  to the BMC. The server executes `On` and `GracefulRestart` out-of-band, and in-band actions that
+  no agent claimed within 30 seconds.
+
 ## [0.1.1] - 2026-10-05
 
 ### Fixed

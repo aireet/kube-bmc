@@ -13,16 +13,22 @@ const message = useMessage()
 
 const lockedReason = computed(() => {
   if (!config.value.powerActions) return t('powerDisabled')
-  if (!props.v.oobConfigured) return t('oobMissing')
+  if (!props.v.inBandPower && !props.v.oobConfigured) return t('powerUnavailable')
   return ''
 })
 const destructive: PowerAction[] = ['ForceOff', 'ForceRestart', 'PowerCycle', 'GracefulShutdown']
+// On and GracefulRestart cannot be executed by the node agent.
+const outOfBandOnly: PowerAction[] = ['On', 'GracefulRestart']
 const options = computed(() =>
-  powerActions.map((a) => ({
-    key: a,
-    label: t(`action.${a}`),
-    props: destructive.includes(a) ? { style: 'color:#d03050' } : undefined,
-  })),
+  powerActions.map((a) => {
+    const unavailable = outOfBandOnly.includes(a) ? !props.v.oobConfigured : !props.v.inBandPower && !props.v.oobConfigured
+    return {
+      key: a,
+      label: unavailable ? `${t(`action.${a}`)} · ${t('needsOOB')}` : t(`action.${a}`),
+      disabled: unavailable,
+      props: destructive.includes(a) && !unavailable ? { style: 'color:#d03050' } : undefined,
+    }
+  }),
 )
 
 const action = ref<PowerAction>()

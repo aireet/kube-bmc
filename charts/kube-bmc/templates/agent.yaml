@@ -21,6 +21,18 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get"]
+  {{- if .Values.server.powerActions.enabled }}
+  # Execute power actions for the local node in-band.
+  - apiGroups: ["bmc.kube-bmc.io"]
+    resources: ["bmcactions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["bmc.kube-bmc.io"]
+    resources: ["bmcactions/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+  {{- end }}
 ---
 # Heartbeat Leases live in the release namespace.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -108,6 +120,9 @@ spec:
             - --status-refresh={{ .Values.agent.statusRefresh }}
             - --lease-duration={{ .Values.agent.leaseDuration }}
             - --cache-dir=/cache
+            {{- if .Values.server.powerActions.enabled }}
+            - --enable-power-actions
+            {{- end }}
             - --log-level={{ .Values.agent.logLevel }}
           env:
             - name: NODE_NAME

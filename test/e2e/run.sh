@@ -51,7 +51,7 @@ log "Installing the chart with password authentication"
 USERS=$(printf 'e2e-password' | docker run --rm -i --entrypoint kube-bmc "$IMAGE" hash-password admin)
 helm install kube-bmc "$ROOT/charts/kube-bmc" --namespace "$NS" --create-namespace --wait --timeout 3m \
   --set image.repository=kube-bmc --set image.tag=e2e --set image.pullPolicy=Never \
-  --set agent.interval=10s --set agent.leaseDuration=30s \
+  --set agent.interval=10s --set agent.leaseDuration=30s --set server.powerActions.enabled=true \
   --set auth.mode=password --set auth.sessionSecret="$(head -c 48 /dev/urandom | base64)" \
   --set-string "auth.password.users[0]=$USERS"
 
@@ -95,9 +95,14 @@ log "kubectl plugin"
 kubectl bmc list | grep -q "$NODE" || fail "kubectl bmc list"
 kubectl bmc describe "$NODE" | grep -q "Condition Ready" || fail "kubectl bmc describe"
 
-log "Power actions are rejected while disabled"
-kubectl bmc power "$NODE" On --reason "e2e" --yes --wait --timeout 60s >"$WORK/power.out" 2>&1 && fail "power action succeeded"
-grep -q "Rejected: power actions are disabled" "$WORK/power.out" || { cat "$WORK/power.out"; fail "power action was not rejected"; }
+log "In-band power actions are executed by the node agent"
+# kind nodes have no /dev/ipmi0, so the agent claims the action and reports the ipmitool failure.
+kubectl bmc power "$NODE" ForceRestart --reason "e2e" --yes --wait --timeout 90s >"$WORK/power.out" 2>&1 && fail "power action succeeded without a BMC"
+grep -q "Failed: ipmitool chassis power reset" "$WORK/power.out" || { cat "$WORK/power.out"; fail "agent did not execute the action"; }
+
+log "Power on requires out-of-band access"
+kubectl bmc power "$NODE" On --reason "e2e" --yes --wait --timeout 60s >"$WORK/on.out" 2>&1 && fail "power on succeeded"
+grep -q "Rejected: On requires out-of-band access" "$WORK/on.out" || { cat "$WORK/on.out"; fail "power on was not rejected"; }
 
 log "Power actions record the requester"
 [ "$(kubectl get bmcactions -o jsonpath='{.items[0].spec.requestedBy}')" = "$(kubectl auth whoami -o jsonpath='{.status.userInfo.username}')" ] \

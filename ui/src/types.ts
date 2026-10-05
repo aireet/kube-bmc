@@ -67,6 +67,7 @@ export interface View {
   agent?: { pod: string; ip: string; ready: boolean }
   lastSeen?: string
   stale: boolean
+  inBandPower: boolean
   oobConfigured: boolean
 }
 

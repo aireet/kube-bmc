@@ -41,8 +41,10 @@ server:
   staleAfter: 10m
   # Public base URL of the dashboard, e.g. https://kube-bmc.example.com. Required for OIDC.
   externalURL: ""
-  # Execute BMCActions (power on, off, restart). When disabled, actions are recorded and rejected.
-  # Enable authentication (auth.mode=oidc) before enabling power actions.
+  # Power actions (BMCAction). Shutdown, restart and power cycle are executed by the agent of
+  # the target node through its local BMC interface; no BMC credentials are needed. Power on
+  # needs out-of-band access (server.credentials). When disabled, actions are rejected.
+  # Enable authentication (auth.mode) before enabling power actions.
   powerActions:
     enabled: false
     timeout: 2m

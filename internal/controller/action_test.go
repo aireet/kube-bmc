@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,7 +139,7 @@ func TestActionRejected(t *testing.T) {
 	}{
 		"disabled":       {false, []client.Object{bmc("gpu-01"), secret}, "power actions are disabled on this kube-bmc server"},
 		"unknown bmc":    {true, []client.Object{secret}, "BMC gpu-01 not found"},
-		"no credentials": {true, []client.Object{bmc("gpu-01")}, `credentials secret kube-bmc-system/bmc-credentials: secrets "bmc-credentials" not found`},
+		"no credentials": {true, []client.Object{bmc("gpu-01")}, `the node agent on gpu-01 did not execute the action within 0s and out-of-band access is not configured`},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -180,5 +181,48 @@ func TestFinishedActionExpires(t *testing.T) {
 	err := f.c.Get(context.Background(), client.ObjectKey{Name: "a1"}, &bmcv1.BMCAction{})
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("expired action still exists: %v", err)
+	}
+}
+
+func TestInBandActionIsLeftToTheAgent(t *testing.T) {
+	a := action("a1", "gpu-01", bmcv1.ActionForceRestart)
+	f := newFixture(t, true, bmc("gpu-01"), secret, a)
+	f.r.ClaimTimeout = 30 * time.Second
+	created := f.action("a1").CreationTimestamp.Time
+	f.now = created.Add(10 * time.Second)
+
+	if res := f.reconcile("a1"); res.RequeueAfter != 20*time.Second || len(f.calls) != 0 {
+		t.Fatalf("requeue = %v, calls = %d", res.RequeueAfter, len(f.calls))
+	}
+	if p := f.action("a1").Status.Phase; p != "" {
+		t.Fatalf("phase = %s during the claim window", p)
+	}
+	// Unclaimed after the window: the node is down, so the server uses out-of-band access.
+	f.now = created.Add(31 * time.Second)
+	f.reconcile("a1")
+	if got := f.action("a1"); got.Status.Phase != bmcv1.PhaseSucceeded || len(f.calls) != 1 {
+		t.Fatalf("status = %+v, calls = %d", got.Status, len(f.calls))
+	}
+}
+
+func TestUnclaimedInBandActionWithoutCredentials(t *testing.T) {
+	f := newFixture(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionPowerCycle))
+	f.r.ClaimTimeout = 30 * time.Second
+	f.now = f.action("a1").CreationTimestamp.Add(time.Minute)
+	f.reconcile("a1")
+	a := f.action("a1")
+	want := "the node agent on gpu-01 did not execute the action within 30s and out-of-band access is not configured"
+	if a.Status.Phase != bmcv1.PhaseRejected || a.Status.Message != want {
+		t.Fatalf("status = %+v", a.Status)
+	}
+}
+
+func TestPowerOnNeedsOutOfBand(t *testing.T) {
+	f := newFixture(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionOn))
+	f.r.ClaimTimeout = time.Hour // On is never left to the agent
+	f.reconcile("a1")
+	a := f.action("a1")
+	if a.Status.Phase != bmcv1.PhaseRejected || !strings.HasPrefix(a.Status.Message, "On requires out-of-band access, which is not configured") {
+		t.Fatalf("status = %+v", a.Status)
 	}
 }

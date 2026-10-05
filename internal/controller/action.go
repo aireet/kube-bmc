@@ -19,16 +19,21 @@ import (
 // PowerFunc executes a power action against a resolved target.
 type PowerFunc func(ctx context.Context, t oob.Target, a bmcv1.PowerAction) error
 
-// ActionReconciler executes each BMCAction at most once.
+// ActionReconciler runs in the server. It rejects actions while power actions are
+// disabled, executes actions out-of-band that node agents cannot execute in-band (On,
+// GracefulRestart, and in-band actions not claimed within ClaimTimeout because the node
+// is down), and deletes finished actions after their TTL.
 //
-// The Pending→Running transition is an optimistic-concurrency status update, so when
-// several server replicas reconcile the same object only one of them executes it.
+// Every executor claims an action with an optimistic-concurrency status update
+// (Pending→Running), so each action is executed at most once.
 type ActionReconciler struct {
 	Client      client.Client
 	Credentials Credentials
 	Power       PowerFunc
 	// Enabled is the master switch for power actions. When false, new actions are rejected.
 	Enabled bool
+	// ClaimTimeout is how long in-band actions are left to the node agent.
+	ClaimTimeout time.Duration
 	// Timeout bounds a single execution; Running actions older than twice this value are
 	// marked Failed because the executing replica must have stopped.
 	Timeout time.Duration
@@ -41,9 +46,11 @@ func (r *ActionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).For(&bmcv1.BMCAction{}).Named("bmcaction").Complete(r)
 }
 
-func (r *ActionReconciler) now() metav1.Time {
-	if r.Now != nil {
-		return metav1.NewTime(r.Now())
+func (r *ActionReconciler) now() metav1.Time { return clock(r.Now) }
+
+func clock(now func() time.Time) metav1.Time {
+	if now != nil {
+		return metav1.NewTime(now())
 	}
 	return metav1.Now()
 }
@@ -67,6 +74,11 @@ func (r *ActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if !r.Enabled {
 		return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseRejected, "power actions are disabled on this kube-bmc server")
 	}
+	if InBand(a.Spec.Action) {
+		if wait := a.CreationTimestamp.Add(r.ClaimTimeout).Sub(r.now().Time); wait > 0 {
+			return ctrl.Result{RequeueAfter: wait}, nil // left to the node agent
+		}
+	}
 	bmc := &bmcv1.BMC{}
 	if err := r.Client.Get(ctx, client.ObjectKey{Name: a.Spec.BMCName}, bmc); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -76,7 +88,12 @@ func (r *ActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 	creds, err := r.Credentials.For(ctx, bmc)
 	if err != nil {
-		return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseRejected, err.Error())
+		reason := fmt.Sprintf("%s requires out-of-band access, which is not configured: %v", a.Spec.Action, err)
+		if InBand(a.Spec.Action) {
+			reason = fmt.Sprintf("the node agent on %s did not execute the action within %s and out-of-band access is not configured",
+				a.Spec.BMCName, r.ClaimTimeout)
+		}
+		return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseRejected, reason)
 	}
 	target, err := oob.TargetFor(bmc, creds)
 	if err != nil {
@@ -102,10 +119,10 @@ func (r *ActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	log.FromContext(ctx).Info("executing power action", "bmc", bmc.Name, "action", a.Spec.Action,
 		"requestedBy", a.Spec.RequestedBy, "address", target.Address)
 	if err := r.Power(execCtx, target, a.Spec.Action); err != nil {
-		r.event(ctx, a, bmc.Spec.NodeName, err)
+		recordEvent(ctx, r.Client, a, bmc.Spec.NodeName, err, r.now())
 		return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseFailed, err.Error())
 	}
-	r.event(ctx, a, bmc.Spec.NodeName, nil)
+	recordEvent(ctx, r.Client, a, bmc.Spec.NodeName, nil, r.now())
 	return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseSucceeded, fmt.Sprintf("%s accepted by the BMC", a.Spec.Action))
 }
 
@@ -129,15 +146,14 @@ func (r *ActionReconciler) expire(ctx context.Context, a *bmcv1.BMCAction) (ctrl
 	return ctrl.Result{}, client.IgnoreNotFound(r.Client.Delete(ctx, a))
 }
 
-// event records the outcome on the Node so it appears in `kubectl describe node`.
-func (r *ActionReconciler) event(ctx context.Context, a *bmcv1.BMCAction, node string, actionErr error) {
+// recordEvent records a power action on the Node so it appears in `kubectl describe node`.
+func recordEvent(ctx context.Context, c client.Client, a *bmcv1.BMCAction, node string, actionErr error, now metav1.Time) {
 	typ, reason := corev1.EventTypeNormal, "BMCPowerAction"
-	msg := fmt.Sprintf("%s requested by %s succeeded (BMCAction %s)", a.Spec.Action, a.Spec.RequestedBy, a.Name)
+	msg := fmt.Sprintf("%s requested by %s (BMCAction %s)", a.Spec.Action, a.Spec.RequestedBy, a.Name)
 	if actionErr != nil {
 		typ, reason = corev1.EventTypeWarning, "BMCPowerActionFailed"
 		msg = fmt.Sprintf("%s requested by %s failed: %v (BMCAction %s)", a.Spec.Action, a.Spec.RequestedBy, actionErr, a.Name)
 	}
-	now := r.now()
 	ev := &corev1.Event{
 		ObjectMeta:     metav1.ObjectMeta{GenerateName: node + ".", Namespace: metav1.NamespaceDefault},
 		InvolvedObject: corev1.ObjectReference{Kind: "Node", Name: node, APIVersion: "v1"},
@@ -149,7 +165,7 @@ func (r *ActionReconciler) event(ctx context.Context, a *bmcv1.BMCAction, node s
 		LastTimestamp:  now,
 		Count:          1,
 	}
-	if err := r.Client.Create(ctx, ev); err != nil {
+	if err := c.Create(ctx, ev); err != nil {
 		log.FromContext(ctx).Error(err, "recording node event failed", "node", node)
 	}
 }

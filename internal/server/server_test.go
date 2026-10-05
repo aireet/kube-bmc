@@ -117,7 +117,8 @@ func TestReadEndpoints(t *testing.T) {
 	h, _ := testHandler(t, false)
 	rec := do(t, h, "alice", "GET", "/api/v1/bmcs", "")
 	var views []View
-	if err := json.Unmarshal(rec.Body.Bytes(), &views); err != nil || len(views) != 1 || views[0].Agent == nil || views[0].Stale {
+	if err := json.Unmarshal(rec.Body.Bytes(), &views); err != nil || len(views) != 1 || views[0].Agent == nil || views[0].Stale ||
+		views[0].InBandPower {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body)
 	}
 	if rec := do(t, h, "alice", "GET", "/api/v1/bmcs/gpu-01/live", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), "Inlet_Temp") {

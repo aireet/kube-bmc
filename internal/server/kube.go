@@ -237,6 +237,7 @@ func (k *Kube) view(ctx context.Context, b *bmcv1.BMC, node *corev1.Node, pod *c
 	}
 	if pod != nil {
 		v.Agent = &AgentInfo{Pod: pod.Name, IP: pod.Status.PodIP, Ready: podReady(pod)}
+		v.InBandPower = v.Agent.Ready && !v.Stale
 	}
 	_, err := k.opts.Credentials.For(ctx, b)
 	v.OOBConfigured = err == nil

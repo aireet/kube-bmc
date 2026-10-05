@@ -62,9 +62,10 @@ Features:
 - **Inventory and health** from any IPMI 2.0 BMC: FRU data, firmware, management network,
   sensors with thresholds, chassis faults, DCMI power and the System Event Log. Health is
   summarized as `OK`, `Warning` or `Critical` with a list of problems.
-- **Power control** (`On`, `GracefulShutdown`, `GracefulRestart`, `ForceRestart`, `PowerCycle`,
-  `ForceOff`) over Redfish or IPMI-over-LAN. Every request is a `BMCAction` object, which serves
-  as the audit record. Disabled by default.
+- **Power control**: shutdown, restart and power cycle are executed by the agent on the node
+  through its local BMC interface, without BMC credentials; power on uses Redfish or
+  IPMI-over-LAN. Every request is a `BMCAction` object, which serves as the audit record.
+  Disabled by default.
 - **Three interfaces**: the web dashboard, the `kubectl bmc` plugin and an MCP endpoint for AI
   agents. Power actions from all of them are recorded with the requester's identity.
 - **Authentication** with OpenID Connect or built-in username and password for the dashboard, and
@@ -104,13 +105,15 @@ flowchart LR
   A -. "/metrics" .-> P[Prometheus]
   S[kube-bmc server<br>Deployment] -- "watch BMC, BMCAction" --> K
   S -- "live sensors and SEL" --> A
-  S -- "BMCAction: Redfish /<br>IPMI-over-LAN" --> B
+  A -- "BMCAction: shutdown,<br>restart (in-band)" --> B
+  S -- "BMCAction: power on<br>(Redfish / IPMI-over-LAN)" --> B
   U[Dashboard / MCP clients] -- "OIDC or bearer token" --> S
   C[kubectl bmc] -- "kubeconfig" --> K
 ```
 
 **Agent.** Runs privileged on every node and polls the local BMC with read-only `ipmitool`
-commands on three schedules:
+commands on three schedules. When power actions are enabled, it also executes shutdown, restart
+and power cycle requests for its own node.
 
 | Data | Default interval | Notes |
 |---|---|---|
@@ -156,30 +159,41 @@ spec:
   reason: kernel hang, node unreachable
 status:
   phase: Succeeded            # Pending, Running, Succeeded, Failed or Rejected
-  message: ForceRestart accepted by the BMC
+  message: ForceRestart sent to the local BMC through /dev/ipmi0
   powerStateBefore: "On"
 ```
 
-- The server executes each action once, out-of-band through Redfish or IPMI-over-LAN, so it
-  works when the node is down. The outcome is also recorded as an Event on the `Node`.
-- `spec.requestedBy` is set to the authenticated user by the server (dashboard and MCP) and by
-  kubectl-bmc.
-- With `server.powerActions.enabled=false` (the default), actions are recorded and rejected.
-- Finished actions are deleted after `server.powerActions.ttl` (seven days by default).
+Who executes an action depends on whether it can be done from the node itself:
 
-To enable power actions, provide BMC credentials:
+| Action | Executed by | Requirements |
+|---|---|---|
+| `GracefulShutdown`, `ForceOff`, `ForceRestart`, `PowerCycle` | The agent on the target node, through `/dev/ipmi0` | None; no BMC credentials or BMC network access |
+| `On`, `GracefulRestart` | The server, out-of-band over Redfish or IPMI-over-LAN | BMC credentials and network access from the server to the BMC |
+
+If the agent does not claim an in-band action within 30 seconds, because the node is down, the
+server executes it out-of-band when credentials are configured, and rejects it otherwise. Every
+action is executed at most once and recorded as an Event on the `Node`. `spec.requestedBy` is set
+to the authenticated user by the server (dashboard and MCP) and by kubectl-bmc.
+
+Power actions are disabled by default. To enable them:
+
+```bash
+helm upgrade kube-bmc oci://ghcr.io/aireet/charts/kube-bmc -n kube-bmc-system --reuse-values \
+  --set server.powerActions.enabled=true
+```
+
+For power on, also provide BMC credentials, and make sure the server can reach the BMC network:
 
 ```bash
 kubectl -n kube-bmc-system create secret generic bmc-credentials \
   --from-literal=username=kube-bmc --from-literal=password='...'
-
 helm upgrade kube-bmc oci://ghcr.io/aireet/charts/kube-bmc -n kube-bmc-system --reuse-values \
-  --set server.powerActions.enabled=true \
   --set server.credentials.existingSecret=bmc-credentials
 ```
 
 The BMC address is discovered in-band. To override it, or to use per-server credentials or IPMI
 instead of Redfish, edit the `BMC` spec (see [examples/bmc-override.yaml](examples/bmc-override.yaml)).
+Finished actions are deleted after `server.powerActions.ttl` (seven days by default).
 
 ## Authentication
 
@@ -265,9 +279,11 @@ Example alerting rules: [examples/prometheus-rules.yaml](examples/prometheus-rul
 
 ## Security
 
-- The agent runs privileged because opening `/dev/ipmi0` requires it. It only issues read-only
-  commands (`mc info`, `mc guid`, `lan print`, `fru print`, `chassis status`, `sdr`, `sensor`,
-  `sel info`, `sel elist`, `dcmi power reading`).
+- The agent runs privileged because opening `/dev/ipmi0` requires it. For monitoring it only
+  issues read-only commands (`mc info`, `mc guid`, `lan print`, `fru print`, `chassis status`,
+  `sdr`, `sensor`, `sel info`, `sel elist`, `sel get`, `dcmi power reading`, and reading LAN
+  parameters with `raw 0x0c 0x02`). It runs `chassis power` only for BMCActions of its own node,
+  and only when power actions are enabled.
 - The server runs as non-root with a read-only root filesystem and no capabilities. It reads
   Secrets only in its own namespace.
 - Without authentication (`auth.mode=none`) everyone who can reach the server has full access,

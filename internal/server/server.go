@@ -52,7 +52,11 @@ type View struct {
 	LastSeen *metav1.Time `json:"lastSeen,omitempty"`
 	// Stale is set when the agent heartbeat has expired.
 	Stale bool `json:"stale"`
-	// OOBConfigured is set when out-of-band credentials are available for this BMC.
+	// InBandPower is set when the node agent is running and can execute shutdown, restart
+	// and power cycle through the local BMC interface.
+	InBandPower bool `json:"inBandPower"`
+	// OOBConfigured is set when out-of-band credentials are available for this BMC, which
+	// power on requires.
 	OOBConfigured bool `json:"oobConfigured"`
 }
 

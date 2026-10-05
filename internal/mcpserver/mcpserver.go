@@ -80,7 +80,8 @@ func New(o Options) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "power_action",
 		Description: "Request a power operation on a physical server through its BMC. This interrupts every workload on the node. " +
-			"Only use it when the user explicitly asks. The request is recorded with the caller's identity and reason.",
+			"Only use it when the user explicitly asks. The request is recorded with the caller's identity and reason. " +
+			"GracefulShutdown, ForceOff, ForceRestart and PowerCycle are executed by the node agent; On and GracefulRestart need out-of-band access.",
 		Annotations: &mcp.ToolAnnotations{Title: "Power action", DestructiveHint: ptr(true), IdempotentHint: false, OpenWorldHint: ptr(true)},
 	}, t.powerAction)
 

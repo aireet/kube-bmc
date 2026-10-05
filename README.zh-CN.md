@@ -32,7 +32,7 @@ server131   server131   10.20.0.31      Gooxi    SY8108G-G4   On      1240    43
 功能：
 
 - **资产与健康**：支持任意 IPMI 2.0 BMC，采集 FRU、固件、管理网络、带阈值的传感器、机箱故障、DCMI 功耗和系统事件日志（SEL），汇总为 `OK` / `Warning` / `Critical` 健康状态，并给出问题列表。
-- **电源控制**（`On`、`GracefulShutdown`、`GracefulRestart`、`ForceRestart`、`PowerCycle`、`ForceOff`）：通过 Redfish 或 IPMI-over-LAN 执行。每次请求都是一个 `BMCAction` 对象，同时作为审计记录。默认关闭。
+- **电源控制**：关机、强制重启、断电重启由目标节点上的 agent 通过本机 BMC 通道（`/dev/ipmi0`）执行，不需要 BMC 账号密码，也不需要 BMC 管理网可达；开机需要带外通道（Redfish / IPMI-over-LAN）。每次请求都是一个 `BMCAction` 对象，同时作为审计记录。默认关闭。
 - **三种入口**：Web 控制台、`kubectl bmc` 插件和 MCP 接口。所有电源操作都会记录发起人身份。
 - **认证**：控制台支持 OpenID Connect 登录或内置用户名密码登录；API 和 MCP 客户端可使用 OIDC token，或 kube-bmc 所在 namespace 中 ServiceAccount 的 token。
 - **Prometheus 指标**：覆盖每个传感器，以及功耗、健康状态和 SEL 使用率。
@@ -74,7 +74,7 @@ auth:
 
 ## 电源操作与认证
 
-- 电源操作以 `BMCAction` 对象的形式提交，由 server 通过带外通道执行一次，节点宕机时同样可用。执行结果会记录为 Node Event。
+- 电源操作以 `BMCAction` 对象的形式提交。关机、重启、断电重启由目标节点的 agent 通过本机 BMC 通道执行；开机和正常重启由 server 走带外通道执行（需要 BMC 账号密码和网络可达）。agent 30 秒内未领取的操作（节点已宕机），在配置了带外访问时由 server 执行，否则拒绝。每个操作最多执行一次，结果记录为 Node Event。
 - `spec.requestedBy` 由 server（控制台和 MCP）和 kubectl-bmc 设置为已认证的用户。
 - `server.powerActions.enabled=false`（默认）时，所有操作都会被记录并拒绝。
 - kube-bmc 面向管理集群的运维团队：只做认证并记录发起人，所有已登录用户都拥有全部权限。能否登录在 IdP 侧控制。

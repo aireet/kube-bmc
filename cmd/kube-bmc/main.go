@@ -172,6 +172,7 @@ func runAgent(ctx context.Context, args []string) error {
 	statusRefresh := fs.Duration("status-refresh", 10*time.Minute, "maximum age of readings in the BMC status when they change only within their deadband")
 	leaseDuration := fs.Duration("lease-duration", 3*time.Minute, "validity of the heartbeat Lease; renewed every third of it")
 	namespace := fs.String("namespace", os.Getenv("POD_NAMESPACE"), "namespace of the heartbeat Lease (defaults to $POD_NAMESPACE)")
+	powerActions := fs.Bool("enable-power-actions", false, "execute power actions for this node through the local BMC interface")
 	logLevel := fs.String("log-level", "info", "debug, info, warn or error")
 	_ = fs.Parse(args)
 
@@ -194,12 +195,35 @@ func runAgent(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	col := collector.New(*node, ipmi.NewClient(ipmi.Exec{Path: *ipmitool}, *cacheDir), collector.Options{
+	runner := ipmi.Exec{Path: *ipmitool}
+	if *powerActions {
+		// The manager watches BMCActions only; everything else is read directly.
+		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+			Scheme:                 scheme(),
+			Metrics:                metricsserver.Options{BindAddress: "0"},
+			HealthProbeBindAddress: "0",
+			Client:                 client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&bmcv1.BMC{}, &corev1.Event{}}}},
+		})
+		if err != nil {
+			return err
+		}
+		if err := (&controller.InBandReconciler{
+			Client: mgr.GetClient(), Node: *node, Runner: runner, Enabled: true, Timeout: 2 * time.Minute,
+		}).SetupWithManager(mgr); err != nil {
+			return err
+		}
+		go func() {
+			if err := mgr.Start(ctx); err != nil {
+				log.Error("power action controller stopped", "err", err)
+			}
+		}()
+	}
+	col := collector.New(*node, ipmi.NewClient(runner, *cacheDir), collector.Options{
 		Interval: *interval, InventoryInterval: *invInterval, SELMinInterval: *selInterval, SELEntries: *selEntries,
 		CommandTimeout: 30 * time.Second, SELTimeout: 3 * time.Minute,
 	}, log)
 
-	log.Info("starting agent", "version", version)
+	log.Info("starting agent", "version", version, "powerActions", *powerActions)
 	return agent.New(k8s, col, agent.Options{
 		NodeName: *node, Namespace: *namespace, Listen: *listen, LeaseDuration: *leaseDuration,
 		StatusRefresh: *statusRefresh, MaxCollectionAge: 3**interval + 30*time.Second, Version: version,
@@ -213,9 +237,10 @@ func runServer(ctx context.Context, args []string) error {
 	agentSelector := fs.String("agent-selector", "app.kubernetes.io/name=kube-bmc,app.kubernetes.io/component=agent", "label selector of agent pods")
 	agentPort := fs.Int("agent-port", 9580, "agent HTTP port")
 	creds := fs.String("default-credentials", "", "Secret with username and password keys used for BMCs without spec.credentialsRef")
-	powerActions := fs.Bool("enable-power-actions", false, "execute BMCActions; when false they are rejected")
+	powerActions := fs.Bool("enable-power-actions", false, "accept power actions; when false they are rejected. Agents need the same flag")
 	actionTimeout := fs.Duration("action-timeout", 2*time.Minute, "timeout of a single power action")
 	actionTTL := fs.Duration("action-ttl", 7*24*time.Hour, "how long finished BMCActions are kept; 0 keeps them forever")
+	claimTimeout := fs.Duration("in-band-claim-timeout", 30*time.Second, "how long in-band actions are left to the node agent before out-of-band access is used")
 	staleAfter := fs.Duration("stale-after", 15*time.Minute, "mark a BMC stale when its agent has neither a heartbeat Lease nor reported for this long")
 	clusterName := fs.String("cluster-name", "", "cluster name shown in the dashboard")
 	externalURL := fs.String("external-url", "", "public base URL of the dashboard, e.g. https://kube-bmc.example.com")
@@ -266,7 +291,7 @@ func runServer(ctx context.Context, args []string) error {
 	credentials := controller.Credentials{Reader: mgr.GetClient(), Namespace: *namespace, Default: *creds}
 	if err := (&controller.ActionReconciler{
 		Client: mgr.GetClient(), Credentials: credentials, Power: oob.Power,
-		Enabled: *powerActions, Timeout: *actionTimeout, TTL: *actionTTL,
+		Enabled: *powerActions, ClaimTimeout: *claimTimeout, Timeout: *actionTimeout, TTL: *actionTTL,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}
