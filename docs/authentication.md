@@ -35,7 +35,7 @@ kube-bmc.
 from standard input:
 
 ```bash
-printf '%s' 'a long password' | docker run --rm -i --entrypoint kube-bmc ghcr.io/aireet/kube-bmc:v0.1.0 hash-password alice
+printf '%s' 'a long password' | docker run --rm -i --entrypoint kube-bmc ghcr.io/aireet/kube-bmc:v0.1.1 hash-password alice
 # alice:$2a$12$...
 ```
 
