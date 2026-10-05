@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/kube-bmc ./cmd/kube-bmc
 
 # ---- runtime: ipmitool is the only dependency (used by the agent) ----
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache ipmitool ca-certificates tzdata
 COPY --from=build /out/kube-bmc /usr/local/bin/kube-bmc
 ENTRYPOINT ["kube-bmc"]
