@@ -106,7 +106,7 @@ export interface Snapshot {
 
 export interface Config {
   version: string
-  powerActions: boolean
+  actions: boolean
   clusterName?: string
   auth: 'none' | 'password' | 'oidc'
 }
@@ -121,15 +121,17 @@ export interface Me {
 
 export const powerActions = ['On', 'GracefulShutdown', 'GracefulRestart', 'ForceRestart', 'PowerCycle', 'ForceOff'] as const
 export type PowerAction = (typeof powerActions)[number]
+export type ActionType = PowerAction | 'IdentifyOn' | 'IdentifyOff' | 'ClearSEL'
 export type ActionPhase = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Rejected'
 
 export interface BMCAction {
   metadata: { name: string; creationTimestamp: string }
-  spec: { bmcName: string; action: PowerAction; requestedBy: string; reason?: string }
+  spec: { bmcName: string; action: ActionType; requestedBy: string; reason?: string }
   status?: {
     phase?: ActionPhase
     message?: string
     powerStateBefore?: PowerState
+    selArchive?: string
     startTime?: string
     completionTime?: string
   }

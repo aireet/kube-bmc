@@ -92,7 +92,7 @@ func testHandler(t *testing.T, powerActions bool) (http.Handler, client.Client) 
 	backend, c := newTestBackend(t)
 	return New(Options{
 		Backend: backend,
-		Config:  Config{Version: "test", PowerActions: powerActions},
+		Config:  Config{Version: "test", Actions: powerActions},
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<html>kube-bmc</html>")}, "assets/app.js": {Data: []byte("1")}},
 		Authn:   headerAuthn{},
 		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -217,6 +217,21 @@ func TestPowerValidation(t *testing.T) {
 	disabled, _ := testHandler(t, false)
 	if rec := do(t, disabled, "alice", "POST", "/api/v1/bmcs/gpu-01/power", `{"action":"On","confirm":"gpu-01"}`); rec.Code != 403 {
 		t.Errorf("disabled: %d", rec.Code)
+	}
+}
+
+func TestIdentifyNeedsNoConfirmation(t *testing.T) {
+	h, c := testHandler(t, true)
+	if rec := do(t, h, "alice", "POST", "/api/v1/bmcs/gpu-01/actions", `{"action":"IdentifyOn"}`); rec.Code != http.StatusAccepted {
+		t.Fatalf("identify: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(t, h, "alice", "POST", "/api/v1/bmcs/gpu-01/actions", `{"action":"ClearSEL","reason":"x"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("ClearSEL without confirmation: %d", rec.Code)
+	}
+	var list bmcv1.BMCActionList
+	_ = c.List(context.Background(), &list)
+	if len(list.Items) != 1 || list.Items[0].Spec.Action != bmcv1.ActionIdentifyOn {
+		t.Fatalf("actions = %+v", list.Items)
 	}
 }
 

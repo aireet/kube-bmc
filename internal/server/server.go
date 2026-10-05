@@ -77,16 +77,17 @@ type Backend interface {
 // ActionRequest is a validated request to create a BMCAction.
 type ActionRequest struct {
 	BMC         string
-	Action      bmcv1.PowerAction
+	Action      bmcv1.ActionType
 	RequestedBy string
 	Reason      string
 }
 
 // Config is exposed to the dashboard.
 type Config struct {
-	Version      string `json:"version"`
-	PowerActions bool   `json:"powerActions"`
-	ClusterName  string `json:"clusterName,omitempty"`
+	Version string `json:"version"`
+	// Actions is true when BMCActions (power, identify light, clearing the SEL) are accepted.
+	Actions     bool   `json:"actions"`
+	ClusterName string `json:"clusterName,omitempty"`
 	// Auth is the browser sign-in mode: "none", "password" or "oidc".
 	Auth string `json:"auth"`
 }
@@ -123,7 +124,8 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("GET /api/v1/bmcs", s.list)
 	api.HandleFunc("GET /api/v1/bmcs/{name}", s.get)
 	api.HandleFunc("GET /api/v1/bmcs/{name}/live", s.live)
-	api.HandleFunc("POST /api/v1/bmcs/{name}/power", s.power)
+	api.HandleFunc("POST /api/v1/bmcs/{name}/actions", s.action)
+	api.HandleFunc("POST /api/v1/bmcs/{name}/power", s.action) // deprecated path
 	api.HandleFunc("GET /api/v1/actions", s.listActions)
 	api.HandleFunc("GET /api/v1/actions/{name}", s.getAction)
 
@@ -175,17 +177,22 @@ func (s *Server) getAction(w http.ResponseWriter, r *http.Request) {
 	respond(w, a, err)
 }
 
-type powerRequest struct {
-	Action bmcv1.PowerAction `json:"action"`
-	// Confirm must equal the BMC name.
+type actionRequest struct {
+	Action bmcv1.ActionType `json:"action"`
+	// Confirm must equal the BMC name for actions other than the identify light.
 	Confirm string `json:"confirm"`
 	Reason  string `json:"reason"`
 }
 
-func (s *Server) power(w http.ResponseWriter, r *http.Request) {
+// needsConfirmation reports whether an action interrupts the server or deletes data.
+func needsConfirmation(a bmcv1.ActionType) bool {
+	return a != bmcv1.ActionIdentifyOn && a != bmcv1.ActionIdentifyOff
+}
+
+func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if !s.Config.PowerActions {
-		writeError(w, http.StatusForbidden, "power actions are disabled on this kube-bmc server")
+	if !s.Config.Actions {
+		writeError(w, http.StatusForbidden, "actions are disabled on this kube-bmc server")
 		return
 	}
 	// Requiring a JSON content type prevents cross-site form submissions from using
@@ -194,7 +201,7 @@ func (s *Server) power(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
 		return
 	}
-	var req powerRequest
+	var req actionRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -203,7 +210,7 @@ func (s *Server) power(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unsupported action "+string(req.Action))
 		return
 	}
-	if req.Confirm != name {
+	if needsConfirmation(req.Action) && req.Confirm != name {
 		writeError(w, http.StatusBadRequest, "confirm must equal the BMC name")
 		return
 	}
@@ -213,7 +220,7 @@ func (s *Server) power(w http.ResponseWriter, r *http.Request) {
 		writeBackendError(w, err)
 		return
 	}
-	s.Log.Info("power action requested", "bmc", name, "action", req.Action, "user", id.Username, "bmcaction", a.Name)
+	s.Log.Info("action requested", "bmc", name, "action", req.Action, "user", id.Username, "bmcaction", a.Name)
 	writeJSON(w, http.StatusAccepted, a)
 }
 

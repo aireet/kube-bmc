@@ -153,11 +153,11 @@ spec:
             {{- with include "kube-bmc.credentialsSecret" . }}
             - {{ printf "--default-credentials=%v" (.) | quote }}
             {{- end }}
-            {{- if .Values.server.powerActions.enabled }}
-            - --enable-power-actions
+            {{- if include "kube-bmc.actionsEnabled" . }}
+            - --enable-actions
             {{- end }}
-            - {{ printf "--action-timeout=%v" (.Values.server.powerActions.timeout) | quote }}
-            - {{ printf "--action-ttl=%v" (.Values.server.powerActions.ttl) | quote }}
+            - {{ printf "--action-timeout=%v" (.Values.server.actions.timeout) | quote }}
+            - {{ printf "--action-ttl=%v" (.Values.server.actions.ttl) | quote }}
             {{- with .Values.server.externalURL }}
             - {{ printf "--external-url=%v" (.) | quote }}
             {{- end }}

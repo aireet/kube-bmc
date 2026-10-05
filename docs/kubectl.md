@@ -27,6 +27,8 @@ Or build it from source: `go install github.com/aireet/kube-bmc/cmd/kubectl-bmc@
 | `kubectl bmc sensors NAME [--type T] [--problems] [--all]` | Live sensor readings and thresholds |
 | `kubectl bmc events NAME [--limit N] [--grep TEXT]` | Newest System Event Log entries |
 | `kubectl bmc power NAME ACTION --reason TEXT [--yes] [--wait]` | Request a power action |
+| `kubectl bmc locate NAME [--off]` | Turn the identify light on until `--off` |
+| `kubectl bmc clear-sel NAME --reason TEXT [--yes]` | Save the System Event Log to a ConfigMap and clear it |
 | `kubectl bmc actions [NAME]` | Power actions, newest first |
 
 The plugin is meant for cluster administrators. Live data (`sensors`, `events`) is read from

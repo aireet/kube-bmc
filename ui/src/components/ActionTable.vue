@@ -25,7 +25,7 @@ const columns = computed<DataTableColumns<BMCAction>>(() => [
   },
   { title: t('requestedBy'), key: 'requestedBy', minWidth: 200, ellipsis: { tooltip: true }, render: (a) => h('span', { class: 'mono' }, a.spec.requestedBy) },
   { title: t('reason'), key: 'reason', minWidth: 200, ellipsis: { tooltip: true }, render: (a) => a.spec.reason ?? '' },
-  { title: t('message'), key: 'message', minWidth: 240, ellipsis: { tooltip: true }, render: (a) => a.status?.message ?? '' },
+  { title: t('message'), key: 'message', minWidth: 260, ellipsis: { tooltip: true }, render: (a) => a.status?.message ?? '' },
   {
     title: t('created'), key: 'created', width: 110,
     render: (a) => h(NTooltip, null, {

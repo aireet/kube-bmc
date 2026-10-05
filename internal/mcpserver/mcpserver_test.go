@@ -86,7 +86,7 @@ func (b *backend) GetAction(_ context.Context, name string) (*bmcv1.BMCAction, e
 // username, and returns a session authenticated as user.
 func connect(t *testing.T, b *backend, powerActions bool, user string) *mcp.ClientSession {
 	t.Helper()
-	srv := New(Options{Backend: b, PowerActions: powerActions, Version: "test"})
+	srv := New(Options{Backend: b, Actions: powerActions, Version: "test"})
 	verifier := func(_ context.Context, token string, _ *http.Request) (*mcpauth.TokenInfo, error) {
 		if token == "" {
 			return nil, mcpauth.ErrInvalidToken
@@ -145,7 +145,7 @@ func TestTools(t *testing.T) {
 		}
 	}
 	slices.Sort(names)
-	want := "fleet_summary,get_action,get_events,get_sensors,get_server,list_actions,list_servers,power_action"
+	want := "clear_sel,fleet_summary,get_action,get_events,get_sensors,get_server,list_actions,list_servers,locate_server,power_action"
 	if got := strings.Join(names, ","); got != want {
 		t.Fatalf("tools = %s", got)
 	}
@@ -212,6 +212,24 @@ func TestPowerAction(t *testing.T) {
 	}
 	if len(b.actions) != 1 {
 		t.Fatalf("%d actions recorded", len(b.actions))
+	}
+}
+
+func TestLocateAndClearSEL(t *testing.T) {
+	b := &backend{}
+	cs := connect(t, b, true, "operator")
+	var a ActionSummary
+	if err := call(t, cs, "locate_server", map[string]any{"name": "gpu-02", "on": true}, &a); err != nil || a.Action != bmcv1.ActionIdentifyOn {
+		t.Fatalf("locate: %+v %v", a, err)
+	}
+	if err := call(t, cs, "clear_sel", map[string]any{"name": "gpu-02", "reason": ""}, &a); err == nil {
+		t.Fatal("clear_sel without reason accepted")
+	}
+	if err := call(t, cs, "clear_sel", map[string]any{"name": "gpu-02", "reason": "log full"}, &a); err != nil || a.Action != bmcv1.ActionClearSEL {
+		t.Fatalf("clear_sel: %+v %v", a, err)
+	}
+	if err := call(t, cs, "power_action", map[string]any{"name": "gpu-02", "action": "ClearSEL", "reason": "x"}, &a); err == nil {
+		t.Fatal("power_action accepted a non-power action")
 	}
 }
 

@@ -176,13 +176,66 @@ func TestPowerWait(t *testing.T) {
 			return err
 		}
 		if a, ok := obj.(*bmcv1.BMCAction); ok {
-			a.Status.Phase, a.Status.Message = bmcv1.PhaseRejected, "power actions are disabled on this kube-bmc server"
+			a.Status.Phase, a.Status.Message = bmcv1.PhaseRejected, "actions are disabled on this kube-bmc server"
 		}
 		return nil
 	}}
 	h := newHarness(t, funcs, fixtureBMC("server131", bmcv1.HealthOK))
 	err := h.run(t, "power", "server131", "On", "--reason", "test", "--yes", "--wait", "--timeout", time.Minute.String())
-	if err == nil || !strings.Contains(h.out.String(), "Rejected: power actions are disabled") {
+	if err == nil || !strings.Contains(h.out.String(), "Rejected: actions are disabled") {
 		t.Fatalf("err = %v, output:\n%s", err, h.out)
+	}
+}
+
+// succeedActions marks every BMCAction as succeeded when it is read, standing in for the agent.
+var succeedActions = &interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if err := c.Get(ctx, key, obj, opts...); err != nil {
+		return err
+	}
+	if a, ok := obj.(*bmcv1.BMCAction); ok {
+		a.Status.Phase, a.Status.Message = bmcv1.PhaseSucceeded, "done"
+	}
+	return nil
+}}
+
+func TestLocate(t *testing.T) {
+	h := newHarness(t, succeedActions, fixtureBMC("server131", bmcv1.HealthOK))
+	if err := h.run(t, "locate", "server131"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.run(t, "locate", "server131", "--off"); err != nil {
+		t.Fatal(err)
+	}
+	var list bmcv1.BMCActionList
+	_ = h.client.List(context.Background(), &list)
+	got := map[bmcv1.ActionType]bool{}
+	for _, a := range list.Items {
+		got[a.Spec.Action] = true
+	}
+	if len(list.Items) != 2 || !got[bmcv1.ActionIdentifyOn] || !got[bmcv1.ActionIdentifyOff] {
+		t.Fatalf("actions = %+v", list.Items)
+	}
+}
+
+func TestClearSEL(t *testing.T) {
+	h := newHarness(t, succeedActions, fixtureBMC("server131", bmcv1.HealthOK))
+	if err := h.run(t, "clear-sel", "server131"); err == nil || !strings.Contains(err.Error(), "--reason") {
+		t.Fatalf("missing reason: %v", err)
+	}
+	h.in.WriteString("wrong\n")
+	if err := h.run(t, "clear-sel", "server131", "--reason", "log full"); err == nil {
+		t.Fatal("mismatched confirmation accepted")
+	}
+	h.in.WriteString("server131\n")
+	if err := h.run(t, "clear-sel", "server131", "--reason", "log full"); err != nil {
+		t.Fatal(err)
+	}
+	var list bmcv1.BMCActionList
+	_ = h.client.List(context.Background(), &list)
+	if len(list.Items) != 1 || list.Items[0].Spec.Action != bmcv1.ActionClearSEL || list.Items[0].Spec.Reason != "[kubectl] log full" {
+		t.Fatalf("actions = %+v", list.Items)
+	}
+	if err := h.run(t, "power", "server131", "ClearSEL", "--reason", "x", "--yes"); err == nil {
+		t.Fatal("power accepted a non-power action")
 	}
 }

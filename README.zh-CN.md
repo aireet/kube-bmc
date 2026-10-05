@@ -76,7 +76,8 @@ auth:
 
 - 电源操作以 `BMCAction` 对象的形式提交。关机、重启、断电重启由目标节点的 agent 通过本机 BMC 通道执行；开机和正常重启由 server 走带外通道执行（需要 BMC 账号密码和网络可达）。agent 30 秒内未领取的操作（节点已宕机），在配置了带外访问时由 server 执行，否则拒绝。每个操作最多执行一次，结果记录为 Node Event。
 - `spec.requestedBy` 由 server（控制台和 MCP）和 kubectl-bmc 设置为已认证的用户。
-- `server.powerActions.enabled=false`（默认）时，所有操作都会被记录并拒绝。
+- `server.actions.enabled=false`（默认）时，所有操作都会被记录并拒绝。
+- **定位灯**（`IdentifyOn` / `IdentifyOff`）和**清空 SEL**（`ClearSEL`）同样由目标节点的 agent 在本机执行，不需要 BMC 账号。定位灯打开后一直亮，直到手动关闭；清空 SEL 前会先把完整日志存档到一个 ConfigMap（记录在 `status.selArchive`），存档成功后才清空。
 - kube-bmc 面向管理集群的运维团队：只做认证并记录发起人，所有已登录用户都拥有全部权限。能否登录在 IdP 侧控制。
 
 ## MCP 与 kubectl
@@ -88,9 +89,11 @@ claude mcp add --transport http kube-bmc https://kube-bmc.example.com/mcp \
 kubectl bmc list
 kubectl bmc sensors server131 --problems
 kubectl bmc power server131 ForceRestart --reason "kernel hang" --wait
+kubectl bmc locate server131                  # 打开定位灯，--off 关闭
+kubectl bmc clear-sel server131 --reason "日志已满"
 ```
 
-MCP 工具包括 `fleet_summary`、`list_servers`、`get_server`、`get_sensors`、`get_events`、`list_actions`、`get_action` 和 `power_action`，另有提示词 `diagnose_server`。其中 `power_action` 标注为破坏性操作，必须填写原因。
+MCP 工具包括 `fleet_summary`、`list_servers`、`get_server`、`get_sensors`、`get_events`、`list_actions`、`get_action`、`power_action`、`locate_server` 和 `clear_sel`，另有提示词 `diagnose_server`。其中 `power_action` 和 `clear_sel` 标注为破坏性操作，必须填写原因。
 
 详细文档：
 

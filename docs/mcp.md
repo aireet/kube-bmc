@@ -18,9 +18,11 @@ The endpoint is stateless, so it can be served by several replicas without sessi
 | `list_actions` | Recent power actions, optionally for one server |
 | `get_action` | Status of one power action |
 | `power_action` | Request a power action; `name`, `action` and `reason` are required |
+| `locate_server` | Turn the identify light on or off; `name` and `on` |
+| `clear_sel` | Save the System Event Log to a ConfigMap and clear it; `name` and `reason` are required |
 
-Read-only tools carry `readOnlyHint`. `power_action` carries `destructiveHint`, so clients ask for
-confirmation before calling it. The server records the caller's identity in `requestedBy` and
+Read-only tools carry `readOnlyHint`. `power_action` and `clear_sel` carry `destructiveHint`, so
+clients ask for confirmation before calling them. The server records the caller's identity in `requestedBy` and
 prefixes the reason with `[mcp]`. The action is executed asynchronously; poll `get_action`.
 
 The `diagnose_server` prompt guides an agent through a hardware investigation of one server.
@@ -63,5 +65,5 @@ kubectl -n kube-bmc-system create serviceaccount mcp-agent
 export KUBE_BMC_TOKEN=$(kubectl -n kube-bmc-system create token mcp-agent --duration=24h)
 ```
 
-Every authenticated client can call `power_action`. Keep `server.powerActions.enabled` off unless
-power control is required, and review agent requests in the action history.
+Every authenticated client can call `power_action` and `clear_sel`. Keep `server.actions.enabled`
+off unless actions are required, and review agent requests in the action history.

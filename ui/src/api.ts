@@ -1,4 +1,4 @@
-import type { BMCAction, Config, Me, PowerAction, Snapshot, View } from './types'
+import type { ActionType, BMCAction, Config, Me, Snapshot, View } from './types'
 import { config } from './store'
 
 export class UnauthenticatedError extends Error {}
@@ -28,9 +28,9 @@ export const api = {
   action: (name: string) => request<BMCAction>(`/api/v1/actions/${enc(name)}`),
   login: (username: string, password: string) =>
     request<Me>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
-  power: (name: string, action: PowerAction, reason: string) =>
-    request<BMCAction>(`/api/v1/bmcs/${enc(name)}/power`, {
+  act: (name: string, action: ActionType, reason: string, confirm = name) =>
+    request<BMCAction>(`/api/v1/bmcs/${enc(name)}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action, confirm: name, reason }),
+      body: JSON.stringify({ action, confirm, reason }),
     }),
 }

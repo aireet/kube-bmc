@@ -17,6 +17,8 @@ import SensorPanel from '../components/SensorPanel.vue'
 import EventTable from '../components/EventTable.vue'
 import PowerMenu from '../components/PowerMenu.vue'
 import ActionTable from '../components/ActionTable.vue'
+import LocateMenu from '../components/LocateMenu.vue'
+import ClearSEL from '../components/ClearSEL.vue'
 
 const props = defineProps<{ name: string }>()
 const route = useRoute()
@@ -85,6 +87,7 @@ const selColor = computed(() => {
           <n-button v-if="s.network?.ipAddress" tag="a" :href="bmcURL(s.network.ipAddress)" target="_blank" secondary>
             <template #icon><n-icon :component="OpenOutline" /></template>{{ t('openBMC') }}
           </n-button>
+          <LocateMenu :v="v" @done="() => { actions.refresh() }" />
           <PowerMenu :v="v" @done="() => { view.refresh(); actions.refresh() }" />
         </div>
       </section>
@@ -172,8 +175,14 @@ const selColor = computed(() => {
         <n-tab-pane name="events" :tab="t('events')">
           <n-alert v-if="live.error.value && !snap" type="warning" :bordered="false" :title="t('liveUnavailable')">{{ live.error.value }}</n-alert>
           <n-skeleton v-else-if="!snap" text :repeat="8" />
-          <div v-else-if="!snap.events?.length" class="muted noev">{{ t('noEvents') }}</div>
-          <EventTable v-else :events="snap.events" />
+          <template v-else>
+            <div class="selbar">
+              <span class="muted">{{ t('selUsage', { entries: String(s.sel?.entries ?? 0), percent: String(s.sel?.usedPercent ?? 0) }) }}</span>
+              <ClearSEL :v="v" @done="() => { view.refresh(); live.refresh(); actions.refresh() }" />
+            </div>
+            <div v-if="!snap.events?.length" class="muted noev">{{ t('noEvents') }}</div>
+            <EventTable v-else :events="snap.events" />
+          </template>
         </n-tab-pane>
 
         <n-tab-pane name="actions" :tab="`${t('actionsNav')}${actions.data.value?.length ? ` · ${actions.data.value.length}` : ''}`">
@@ -250,4 +259,6 @@ h1 { font-size: 24px; margin: 0; letter-spacing: -0.02em; }
   max-height: 70vh;
 }
 .noev { padding: 48px 0; text-align: center; }
+.selbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 13px; }
+@media (max-width: 640px) { .hero-actions { flex-wrap: wrap; } }
 </style>

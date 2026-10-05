@@ -28,3 +28,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "kube-bmc.authSecret" -}}
 {{- .Values.auth.existingSecret | default (printf "%s-auth" (include "kube-bmc.fullname" .)) -}}
 {{- end -}}
+
+{{- define "kube-bmc.actionsEnabled" -}}
+{{- if or .Values.server.actions.enabled .Values.server.powerActions.enabled }}true{{ end -}}
+{{- end -}}

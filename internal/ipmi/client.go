@@ -45,7 +45,8 @@ func (e Exec) Run(ctx context.Context, args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-// Client reads the local BMC. It issues read-only commands only.
+// Client talks to the local BMC. Collection uses read-only commands; ChassisPower,
+// Identify and ClearSEL change the BMC state and are only used to execute BMCActions.
 //
 // Reading the SDR repository over KCS takes several seconds, so the client dumps it to a
 // cache file and passes `-S` to sensor and SEL commands.
@@ -146,6 +147,40 @@ func (c *Client) SELInfo(ctx context.Context) (SELInfo, error) {
 func (c *Client) SEL(ctx context.Context, n int) ([]Event, error) {
 	out, err := c.Runner.Run(ctx, c.withCache("sel", "elist", "last", strconv.Itoa(n))...)
 	return ParseSEL(out), err
+}
+
+// SELText returns the complete System Event Log as printed by `ipmitool sel elist`.
+func (c *Client) SELText(ctx context.Context) ([]byte, error) {
+	return c.Runner.Run(ctx, c.withCache("sel", "elist")...)
+}
+
+// ClearSEL erases the System Event Log.
+func (c *Client) ClearSEL(ctx context.Context) error {
+	_, err := c.Runner.Run(ctx, "sel", "clear")
+	return err
+}
+
+// Identify turns the chassis identify light on until it is turned off, or off. BMCs
+// without support for indefinite identify keep it on for the maximum interval of 255
+// seconds instead; the returned note says so.
+func (c *Client) Identify(ctx context.Context, on bool) (note string, err error) {
+	if !on {
+		_, err = c.Runner.Run(ctx, "chassis", "identify", "0")
+		return "", err
+	}
+	if _, err = c.Runner.Run(ctx, "chassis", "identify", "force"); err == nil {
+		return "", nil
+	}
+	if _, err2 := c.Runner.Run(ctx, "chassis", "identify", "255"); err2 != nil {
+		return "", errors.Join(err, err2)
+	}
+	return "the BMC does not support an indefinite identify light; it stays on for 255 seconds", nil
+}
+
+// ChassisPower runs `ipmitool chassis power <verb>`.
+func (c *Client) ChassisPower(ctx context.Context, verb string) error {
+	_, err := c.Runner.Run(ctx, "chassis", "power", verb)
+	return err
 }
 
 // SELRecord returns the raw content of one SEL entry.

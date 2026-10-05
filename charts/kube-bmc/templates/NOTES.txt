@@ -5,4 +5,4 @@ kube-bmc is installed.
     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kube-bmc.fullname" . }} 8080:{{ .Values.server.service.port }}
     open http://localhost:8080
 
-Power actions are {{ if .Values.server.powerActions.enabled }}ENABLED — make sure the dashboard is behind authentication{{ else }}disabled (server.powerActions.enabled=false){{ end }}.
+Actions (power, identify light, clearing the SEL) are {{ if include "kube-bmc.actionsEnabled" . }}ENABLED. Make sure authentication is configured (auth.mode={{ .Values.auth.mode }}).{{ else }}disabled (server.actions.enabled=false).{{ end }}

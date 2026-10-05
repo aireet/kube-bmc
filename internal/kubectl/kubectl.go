@@ -75,6 +75,8 @@ func NewCommand(streams genericiooptions.IOStreams, version string, clients *Cli
   kubectl bmc sensors gpu-01 --problems
   kubectl bmc events gpu-01 --limit 20
   kubectl bmc power gpu-01 ForceRestart --reason "kernel hang" --wait
+  kubectl bmc locate gpu-01
+  kubectl bmc clear-sel gpu-01 --reason "log full"
   kubectl bmc actions`,
 		PersistentPreRun: func(*cobra.Command, []string) {
 			o.color = o.color && isTerminal(streams.Out)
@@ -84,7 +86,7 @@ func NewCommand(streams genericiooptions.IOStreams, version string, clients *Cli
 	root.PersistentFlags().StringVar(&o.namespace, "kube-bmc-namespace", "kube-bmc-system", "namespace where kube-bmc is installed")
 	root.PersistentFlags().BoolVar(&o.color, "color", true, "colorize output when writing to a terminal")
 
-	root.AddCommand(o.listCmd(), o.describeCmd(), o.sensorsCmd(), o.eventsCmd(), o.powerCmd(), o.actionsCmd(),
+	root.AddCommand(o.listCmd(), o.describeCmd(), o.sensorsCmd(), o.eventsCmd(), o.powerCmd(), o.locateCmd(), o.clearSELCmd(), o.actionsCmd(),
 		&cobra.Command{
 			Use:   "version",
 			Short: "Print the plugin version",
@@ -318,9 +320,9 @@ func (o *options) powerCmd() *cobra.Command {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name, action := args[0], bmcv1.PowerAction(args[1])
-			if !action.Valid() {
-				return fmt.Errorf("unsupported action %q; use one of %v", action, bmcv1.PowerActions)
+			name, action := args[0], bmcv1.ActionType(args[1])
+			if !action.IsPower() {
+				return fmt.Errorf("unsupported power action %q; use one of %v", action, bmcv1.PowerActions)
 			}
 			if strings.TrimSpace(reason) == "" {
 				return errors.New("--reason is required")
@@ -335,38 +337,116 @@ func (o *options) powerCmd() *cobra.Command {
 				return err
 			}
 			if !yes {
-				fmt.Fprintf(o.streams.Out, "%s will be sent to the BMC of %s (%s %s, power %s).\nEvery workload on the node is interrupted. Type the server name to confirm: ",
+				fmt.Fprintf(o.streams.Out, "%s will be sent to the BMC of %s (%s %s, power %s).\nEvery workload on the node is interrupted. ",
 					action, name, b.Status.Device.Manufacturer, b.Status.Device.Product, orDash(string(b.Status.PowerState)))
-				line, _ := bufio.NewReader(o.streams.In).ReadString('\n')
-				if strings.TrimSpace(line) != name {
-					return errors.New("confirmation did not match; nothing was done")
+				if err := o.confirm(name); err != nil {
+					return err
 				}
 			}
-			user, err := c.Whoami(ctx)
-			if err != nil {
-				return err
-			}
-			a := &bmcv1.BMCAction{
-				ObjectMeta: metav1.ObjectMeta{
-					GenerateName: name + "-" + strings.ToLower(string(action)) + "-",
-					Labels:       map[string]string{"bmc.kube-bmc.io/bmc": name},
-				},
-				Spec: bmcv1.BMCActionSpec{BMCName: name, Action: action, RequestedBy: user, Reason: "[kubectl] " + reason},
-			}
-			if err := c.Client.Create(ctx, a); err != nil {
-				return fmt.Errorf("create BMCAction: %w", err)
-			}
-			fmt.Fprintf(o.streams.Out, "bmcaction/%s created\n", a.Name)
-			if !wait {
-				return nil
-			}
-			return o.waitAction(ctx, c.Client, a.Name, timeout)
+			return o.request(ctx, c, name, action, reason, wait, timeout)
 		},
 	}
 	cmd.Flags().StringVar(&reason, "reason", "", "justification recorded with the action (required)")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait until the action finishes")
 	cmd.Flags().DurationVar(&timeout, "timeout", 3*time.Minute, "how long --wait waits")
+	return cmd
+}
+
+// confirm asks the user to type the server name.
+func (o *options) confirm(name string) error {
+	fmt.Fprint(o.streams.Out, "Type the server name to confirm: ")
+	line, _ := bufio.NewReader(o.streams.In).ReadString('\n')
+	if strings.TrimSpace(line) != name {
+		return errors.New("confirmation did not match; nothing was done")
+	}
+	return nil
+}
+
+// request creates a BMCAction and optionally waits for it to finish.
+func (o *options) request(ctx context.Context, c *Clients, name string, action bmcv1.ActionType, reason string, wait bool, timeout time.Duration) error {
+	user, err := c.Whoami(ctx)
+	if err != nil {
+		return err
+	}
+	a := &bmcv1.BMCAction{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: name + "-" + strings.ToLower(string(action)) + "-",
+			Labels:       map[string]string{"bmc.kube-bmc.io/bmc": name},
+		},
+		Spec: bmcv1.BMCActionSpec{BMCName: name, Action: action, RequestedBy: user, Reason: strings.TrimSpace("[kubectl] " + reason)},
+	}
+	if err := c.Client.Create(ctx, a); err != nil {
+		return fmt.Errorf("create BMCAction: %w", err)
+	}
+	fmt.Fprintf(o.streams.Out, "bmcaction/%s created\n", a.Name)
+	if !wait {
+		return nil
+	}
+	return o.waitAction(ctx, c.Client, a.Name, timeout)
+}
+
+func (o *options) locateCmd() *cobra.Command {
+	var off bool
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "locate NAME",
+		Short: "Turn the identify light on until it is turned off with --off",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := o.clients()
+			if err != nil {
+				return err
+			}
+			if err := c.Client.Get(cmd.Context(), client.ObjectKey{Name: args[0]}, &bmcv1.BMC{}); err != nil {
+				return err
+			}
+			action := bmcv1.ActionIdentifyOn
+			if off {
+				action = bmcv1.ActionIdentifyOff
+			}
+			return o.request(cmd.Context(), c, args[0], action, "", true, timeout)
+		},
+	}
+	cmd.Flags().BoolVar(&off, "off", false, "turn the identify light off")
+	cmd.Flags().DurationVar(&timeout, "timeout", time.Minute, "how long to wait for the result")
+	return cmd
+}
+
+func (o *options) clearSELCmd() *cobra.Command {
+	var reason string
+	var yes bool
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "clear-sel NAME",
+		Short: "Save the System Event Log to a ConfigMap and clear it",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			if strings.TrimSpace(reason) == "" {
+				return errors.New("--reason is required")
+			}
+			c, err := o.clients()
+			if err != nil {
+				return err
+			}
+			b := &bmcv1.BMC{}
+			if err := c.Client.Get(cmd.Context(), client.ObjectKey{Name: name}, b); err != nil {
+				return err
+			}
+			if !yes {
+				fmt.Fprintf(o.streams.Out, "The System Event Log of %s (%d entries, %d%% used) will be saved to a ConfigMap and cleared. ",
+					name, b.Status.SEL.Entries, b.Status.SEL.UsedPercent)
+				if err := o.confirm(name); err != nil {
+					return err
+				}
+			}
+			return o.request(cmd.Context(), c, name, bmcv1.ActionClearSEL, reason, true, timeout)
+		},
+	}
+	cmd.Flags().StringVar(&reason, "reason", "", "justification recorded with the action (required)")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
+	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "how long to wait for the result")
 	return cmd
 }
 

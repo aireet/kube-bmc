@@ -2,9 +2,9 @@
 import { computed, ref } from 'vue'
 import { NButton, NDropdown, NModal, NInput, NIcon, NPopover, NFormItem, useMessage } from 'naive-ui'
 import { PowerOutline, ChevronDownOutline, LockClosedOutline } from '@vicons/ionicons5'
-import { api } from '../api'
 import { config } from '../store'
-import { phaseDone, powerActions, type PowerAction, type View } from '../types'
+import { powerActions, type PowerAction, type View } from '../types'
+import { runAction } from '../actions'
 import { t } from '../i18n'
 
 const props = defineProps<{ v: View }>()
@@ -12,7 +12,7 @@ const emit = defineEmits<{ done: [] }>()
 const message = useMessage()
 
 const lockedReason = computed(() => {
-  if (!config.value.powerActions) return t('powerDisabled')
+  if (!config.value.actions) return t('actionsDisabled')
   if (!props.v.inBandPower && !props.v.oobConfigured) return t('powerUnavailable')
   return ''
 })
@@ -43,31 +43,12 @@ function pick(a: PowerAction) {
   reason.value = ''
 }
 
-async function track(name: string, label: string) {
-  for (let i = 0; i < 90; i++) {
-    await new Promise((r) => setTimeout(r, 2000))
-    const a = await api.action(name).catch(() => undefined)
-    const phase = a?.status?.phase
-    if (phaseDone(phase)) {
-      const text = `${label}: ${phase} — ${a?.status?.message ?? ''}`
-      if (phase === 'Succeeded') message.success(text, { duration: 6000 })
-      else message.error(text, { duration: 10000 })
-      emit('done')
-      return
-    }
-  }
-}
-
 async function run() {
   if (!action.value || !canSubmit.value) return
   busy.value = true
-  const label = `${t(`action.${action.value}`)} ${props.v.name}`
   try {
-    const a = await api.power(props.v.name, action.value, reason.value.trim())
-    message.info(t('actionCreated', { name: a.metadata.name }))
+    await runAction(message, props.v.name, action.value, reason.value.trim(), () => emit('done'))
     action.value = undefined
-    emit('done')
-    void track(a.metadata.name, label)
   } catch (e) {
     message.error((e as Error).message)
   } finally {

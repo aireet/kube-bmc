@@ -25,7 +25,7 @@ const ns = "kube-bmc-system"
 
 type powerCall struct {
 	target oob.Target
-	action bmcv1.PowerAction
+	action bmcv1.ActionType
 }
 
 type fixture struct {
@@ -48,7 +48,7 @@ func newFixture(t *testing.T, enabled bool, objs ...client.Object) *fixture {
 	f.r = &ActionReconciler{
 		Client:      f.c,
 		Credentials: Credentials{Reader: f.c, Namespace: ns, Default: "bmc-credentials"},
-		Power: func(_ context.Context, tg oob.Target, a bmcv1.PowerAction) error {
+		Power: func(_ context.Context, tg oob.Target, a bmcv1.ActionType) error {
 			f.calls = append(f.calls, powerCall{tg, a})
 			return f.err
 		},
@@ -85,7 +85,7 @@ func bmc(name string) *bmcv1.BMC {
 	return b
 }
 
-func action(name, target string, a bmcv1.PowerAction) *bmcv1.BMCAction {
+func action(name, target string, a bmcv1.ActionType) *bmcv1.BMCAction {
 	return &bmcv1.BMCAction{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec:       bmcv1.BMCActionSpec{BMCName: target, Action: a, RequestedBy: "alice@example.com", Reason: "maintenance"},
@@ -137,7 +137,7 @@ func TestActionRejected(t *testing.T) {
 		objs    []client.Object
 		want    string
 	}{
-		"disabled":       {false, []client.Object{bmc("gpu-01"), secret}, "power actions are disabled on this kube-bmc server"},
+		"disabled":       {false, []client.Object{bmc("gpu-01"), secret}, "actions are disabled on this kube-bmc server"},
 		"unknown bmc":    {true, []client.Object{secret}, "BMC gpu-01 not found"},
 		"no credentials": {true, []client.Object{bmc("gpu-01")}, `the node agent on gpu-01 did not execute the action within 0s and out-of-band access is not configured`},
 	}
@@ -214,6 +214,17 @@ func TestUnclaimedInBandActionWithoutCredentials(t *testing.T) {
 	want := "the node agent on gpu-01 did not execute the action within 30s and out-of-band access is not configured"
 	if a.Status.Phase != bmcv1.PhaseRejected || a.Status.Message != want {
 		t.Fatalf("status = %+v", a.Status)
+	}
+}
+
+func TestUnclaimedNonPowerActionIsRejected(t *testing.T) {
+	f := newFixture(t, true, bmc("gpu-01"), secret, action("a1", "gpu-01", bmcv1.ActionClearSEL))
+	f.r.ClaimTimeout = 30 * time.Second
+	f.now = f.action("a1").CreationTimestamp.Add(time.Minute)
+	f.reconcile("a1")
+	a := f.action("a1")
+	if a.Status.Phase != bmcv1.PhaseRejected || !strings.HasSuffix(a.Status.Message, "ClearSEL is only available in-band") || len(f.calls) != 0 {
+		t.Fatalf("status = %+v, out-of-band calls = %d", a.Status, len(f.calls))
 	}
 }
 

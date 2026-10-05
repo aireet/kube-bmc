@@ -62,10 +62,10 @@ Features:
 - **Inventory and health** from any IPMI 2.0 BMC: FRU data, firmware, management network,
   sensors with thresholds, chassis faults, DCMI power and the System Event Log. Health is
   summarized as `OK`, `Warning` or `Critical` with a list of problems.
-- **Power control**: shutdown, restart and power cycle are executed by the agent on the node
-  through its local BMC interface, without BMC credentials; power on uses Redfish or
-  IPMI-over-LAN. Every request is a `BMCAction` object, which serves as the audit record.
-  Disabled by default.
+- **Actions**: shutdown, restart, power cycle, the identify light and clearing the System Event
+  Log are executed by the agent on the node through its local BMC interface, without BMC
+  credentials; power on uses Redfish or IPMI-over-LAN. Every request is a `BMCAction` object,
+  which serves as the audit record. Disabled by default.
 - **Three interfaces**: the web dashboard, the `kubectl bmc` plugin and an MCP endpoint for AI
   agents. Power actions from all of them are recorded with the requester's identity.
 - **Authentication** with OpenID Connect or built-in username and password for the dashboard, and
@@ -112,8 +112,8 @@ flowchart LR
 ```
 
 **Agent.** Runs privileged on every node and polls the local BMC with read-only `ipmitool`
-commands on three schedules. When power actions are enabled, it also executes shutdown, restart
-and power cycle requests for its own node.
+commands on three schedules. When actions are enabled, it also executes shutdown, restart, power
+cycle, identify and ClearSEL requests for its own node.
 
 | Data | Default interval | Notes |
 |---|---|---|
@@ -143,9 +143,10 @@ informer cache.
 **kubectl plugin.** Reads `BMC` and `BMCAction` objects directly and fetches live data from the
 agents through the API server's pod proxy, using the caller's kubeconfig.
 
-## Power actions
+## Actions
 
-A power action is a `BMCAction` object:
+Power actions, the identify light and clearing the System Event Log are requested as
+`BMCAction` objects:
 
 ```yaml
 apiVersion: bmc.kube-bmc.io/v1alpha1
@@ -168,18 +169,27 @@ Who executes an action depends on whether it can be done from the node itself:
 | Action | Executed by | Requirements |
 |---|---|---|
 | `GracefulShutdown`, `ForceOff`, `ForceRestart`, `PowerCycle` | The agent on the target node, through `/dev/ipmi0` | None; no BMC credentials or BMC network access |
+| `IdentifyOn`, `IdentifyOff` | The agent on the target node | None. The light stays on until `IdentifyOff`; BMCs without indefinite identify keep it on for 255 seconds. |
+| `ClearSEL` | The agent on the target node | None. The complete log is first saved to a ConfigMap (`status.selArchive`), and cleared only if that succeeded. |
 | `On`, `GracefulRestart` | The server, out-of-band over Redfish or IPMI-over-LAN | BMC credentials and network access from the server to the BMC |
 
-If the agent does not claim an in-band action within 30 seconds, because the node is down, the
+If the agent does not claim a power action within 30 seconds, because the node is down, the
 server executes it out-of-band when credentials are configured, and rejects it otherwise. Every
 action is executed at most once and recorded as an Event on the `Node`. `spec.requestedBy` is set
 to the authenticated user by the server (dashboard and MCP) and by kubectl-bmc.
 
-Power actions are disabled by default. To enable them:
+Actions are disabled by default. To enable them:
 
 ```bash
 helm upgrade kube-bmc oci://ghcr.io/aireet/charts/kube-bmc -n kube-bmc-system --reuse-values \
-  --set server.powerActions.enabled=true
+  --set server.actions.enabled=true
+```
+
+SEL archives can be read with:
+
+```bash
+kubectl -n kube-bmc-system get configmaps -l bmc.kube-bmc.io/sel-archive
+kubectl -n kube-bmc-system get configmap <name> -o jsonpath='{.data.sel\.txt}'
 ```
 
 For power on, also provide BMC credentials, and make sure the server can reach the BMC network:
@@ -193,7 +203,8 @@ helm upgrade kube-bmc oci://ghcr.io/aireet/charts/kube-bmc -n kube-bmc-system --
 
 The BMC address is discovered in-band. To override it, or to use per-server credentials or IPMI
 instead of Redfish, edit the `BMC` spec (see [examples/bmc-override.yaml](examples/bmc-override.yaml)).
-Finished actions are deleted after `server.powerActions.ttl` (seven days by default).
+Finished actions and their SEL archives are deleted after `server.actions.ttl` (seven days by
+default).
 
 ## Authentication
 
@@ -232,7 +243,7 @@ for common identity providers and troubleshooting.
 
 The server exposes the Model Context Protocol over Streamable HTTP at `/mcp`. Tools:
 `fleet_summary`, `list_servers`, `get_server`, `get_sensors`, `get_events`, `list_actions`,
-`get_action` and `power_action`, plus a `diagnose_server` prompt.
+`get_action`, `power_action`, `locate_server` and `clear_sel`, plus a `diagnose_server` prompt.
 
 ```bash
 claude mcp add --transport http kube-bmc https://kube-bmc.example.com/mcp \
@@ -242,7 +253,8 @@ claude mcp add --transport http kube-bmc https://kube-bmc.example.com/mcp \
 `$TOKEN` is an OIDC ID token or the token of a ServiceAccount in the kube-bmc namespace
 (`kubectl -n kube-bmc-system create token <serviceaccount>`).
 
-`power_action` is annotated as destructive and requires a reason. See [docs/mcp.md](docs/mcp.md).
+`power_action` and `clear_sel` are annotated as destructive and require a reason. See
+[docs/mcp.md](docs/mcp.md).
 
 ## kubectl plugin
 
@@ -252,6 +264,8 @@ $ kubectl bmc describe server131
 $ kubectl bmc sensors server131 --problems
 $ kubectl bmc events server131 --grep fan
 $ kubectl bmc power server131 ForceRestart --reason "kernel hang" --wait
+$ kubectl bmc locate server131            # identify light on; --off turns it off
+$ kubectl bmc clear-sel server131 --reason "log full"
 $ kubectl bmc actions
 ```
 
@@ -282,8 +296,8 @@ Example alerting rules: [examples/prometheus-rules.yaml](examples/prometheus-rul
 - The agent runs privileged because opening `/dev/ipmi0` requires it. For monitoring it only
   issues read-only commands (`mc info`, `mc guid`, `lan print`, `fru print`, `chassis status`,
   `sdr`, `sensor`, `sel info`, `sel elist`, `sel get`, `dcmi power reading`, and reading LAN
-  parameters with `raw 0x0c 0x02`). It runs `chassis power` only for BMCActions of its own node,
-  and only when power actions are enabled.
+  parameters with `raw 0x0c 0x02`). It runs `chassis power`, `chassis identify` and `sel clear`
+  only for BMCActions of its own node, and only when actions are enabled.
 - The server runs as non-root with a read-only root filesystem and no capabilities. It reads
   Secrets only in its own namespace.
 - Without authentication (`auth.mode=none`) everyone who can reach the server has full access,
@@ -302,7 +316,7 @@ All chart values are documented in [charts/kube-bmc/values.yaml](charts/kube-bmc
 | `agent.interval` | `30s` | Sensor polling interval |
 | `agent.nodeSelector` | `{}` | Nodes that run the agent |
 | `server.externalURL` | `""` | Public URL of the dashboard; required for OIDC |
-| `server.powerActions.enabled` | `false` | Execute power actions |
+| `server.actions.enabled` | `false` | Accept actions (power, identify light, clearing the SEL) |
 | `server.credentials.existingSecret` | `""` | Default BMC credentials (`username`, `password`) |
 | `server.service.type` | `ClusterIP` | Service type of the dashboard |
 | `auth.mode` | `none` | `none`, `password` or `oidc` |

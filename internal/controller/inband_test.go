@@ -13,29 +13,44 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
+	"github.com/aireet/kube-bmc/internal/ipmi"
 )
 
-// ipmiRecorder records ipmitool calls and the action phase stored at the time of each call.
+// ipmiRecorder records ipmitool calls, the action phase stored at the time of each call
+// and the SEL archives that existed at that time.
 type ipmiRecorder struct {
-	c      client.Client
-	calls  []string
-	phases []bmcv1.ActionPhase
-	err    error
+	c        client.Client
+	calls    []string
+	phases   []bmcv1.ActionPhase
+	archives []int
+	sel      string
+	fail     map[string]error
 }
 
 func (r *ipmiRecorder) Run(ctx context.Context, args ...string) ([]byte, error) {
-	r.calls = append(r.calls, strings.Join(args, " "))
+	cmd := strings.Join(args, " ")
+	r.calls = append(r.calls, cmd)
 	a := &bmcv1.BMCAction{}
 	_ = r.c.Get(ctx, client.ObjectKey{Name: "a1"}, a)
 	r.phases = append(r.phases, a.Status.Phase)
-	return nil, r.err
+	var cms corev1.ConfigMapList
+	_ = r.c.List(ctx, &cms)
+	r.archives = append(r.archives, len(cms.Items))
+	if err := r.fail[cmd]; err != nil {
+		return nil, err
+	}
+	if cmd == "sel elist" {
+		return []byte(r.sel), nil
+	}
+	return nil, nil
 }
 
 func inBand(t *testing.T, enabled bool, objs ...client.Object) (*InBandReconciler, *ipmiRecorder, *fixture) {
 	t.Helper()
 	f := newFixture(t, true, objs...)
-	rec := &ipmiRecorder{c: f.c}
-	return &InBandReconciler{Client: f.c, Node: "gpu-01", Runner: rec, Enabled: enabled, Timeout: time.Minute}, rec, f
+	rec := &ipmiRecorder{c: f.c, fail: map[string]error{}}
+	return &InBandReconciler{Client: f.c, Node: "gpu-01", IPMI: ipmi.NewClient(rec, ""), Namespace: ns,
+		Enabled: enabled, Timeout: time.Minute, Now: func() time.Time { return f.now }}, rec, f
 }
 
 func reconcileInBand(t *testing.T, r *InBandReconciler) {
@@ -46,7 +61,7 @@ func reconcileInBand(t *testing.T, r *InBandReconciler) {
 }
 
 func TestInBandExecutes(t *testing.T) {
-	for act, verb := range map[bmcv1.PowerAction]string{
+	for act, verb := range map[bmcv1.ActionType]string{
 		bmcv1.ActionGracefulShutdown: "soft", bmcv1.ActionForceOff: "off",
 		bmcv1.ActionForceRestart: "reset", bmcv1.ActionPowerCycle: "cycle",
 	} {
@@ -73,7 +88,7 @@ func TestInBandExecutes(t *testing.T) {
 
 func TestInBandReportsFailure(t *testing.T) {
 	r, rec, f := inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionForceRestart))
-	rec.err = errors.New("ipmitool chassis power reset: Could not open device at /dev/ipmi0")
+	rec.fail["chassis power reset"] = errors.New("ipmitool chassis power reset: Could not open device at /dev/ipmi0")
 	reconcileInBand(t, r)
 	if a := f.action("a1"); a.Status.Phase != bmcv1.PhaseFailed || !strings.Contains(a.Status.Message, "/dev/ipmi0") {
 		t.Fatalf("status = %+v", a.Status)
@@ -102,5 +117,72 @@ func TestInBandIgnores(t *testing.T) {
 		if got := f.action("a1").Status.Phase; got != tc.obj.Status.Phase {
 			t.Errorf("%s: phase changed to %s", name, got)
 		}
+	}
+}
+
+func TestIdentify(t *testing.T) {
+	r, rec, f := inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionIdentifyOn))
+	reconcileInBand(t, r)
+	if strings.Join(rec.calls, ",") != "chassis identify force" {
+		t.Fatalf("calls = %v", rec.calls)
+	}
+	if a := f.action("a1"); a.Status.Phase != bmcv1.PhaseSucceeded || a.Status.Message != "identify light turned on until IdentifyOff" {
+		t.Fatalf("status = %+v", a.Status)
+	}
+
+	// BMCs without indefinite identify fall back to the maximum interval.
+	r, rec, f = inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionIdentifyOn))
+	rec.fail["chassis identify force"] = errors.New("Invalid data field in request")
+	reconcileInBand(t, r)
+	if strings.Join(rec.calls, ",") != "chassis identify force,chassis identify 255" {
+		t.Fatalf("calls = %v", rec.calls)
+	}
+	if a := f.action("a1"); a.Status.Phase != bmcv1.PhaseSucceeded || !strings.Contains(a.Status.Message, "255 seconds") {
+		t.Fatalf("status = %+v", a.Status)
+	}
+
+	r, rec, f = inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionIdentifyOff))
+	reconcileInBand(t, r)
+	if strings.Join(rec.calls, ",") != "chassis identify 0" || f.action("a1").Status.Phase != bmcv1.PhaseSucceeded {
+		t.Fatalf("calls = %v, status = %+v", rec.calls, f.action("a1").Status)
+	}
+}
+
+func TestClearSELArchivesFirst(t *testing.T) {
+	a := action("a1", "gpu-01", bmcv1.ActionClearSEL)
+	a.UID = "action-uid"
+	r, rec, f := inBand(t, true, bmc("gpu-01"), a)
+	rec.sel = "237b | 10/04/26 | 17:01:03 UTC | Session Audit #0xff |  | Asserted\n237c | 10/04/26 | 17:01:03 UTC | Session Audit #0xff |  | Asserted\n"
+	reconcileInBand(t, r)
+
+	if strings.Join(rec.calls, ",") != "sel elist,sel clear" {
+		t.Fatalf("calls = %v", rec.calls)
+	}
+	if rec.archives[1] != 1 {
+		t.Fatal("the log was cleared before the archive was stored")
+	}
+	var cms corev1.ConfigMapList
+	_ = f.c.List(context.Background(), &cms)
+	cm := cms.Items[0]
+	if cm.Namespace != ns || cm.Labels[SELArchiveLabel] != "true" || cm.Annotations["bmc.kube-bmc.io/entries"] != "2" ||
+		cm.Data["sel.txt"] != rec.sel || cm.OwnerReferences[0].UID != "action-uid" {
+		t.Fatalf("archive = %+v", cm)
+	}
+	got := f.action("a1")
+	if got.Status.Phase != bmcv1.PhaseSucceeded || got.Status.SELArchive != ns+"/"+cm.Name ||
+		got.Status.Message != "System Event Log cleared; 2 entries saved to ConfigMap "+ns+"/"+cm.Name {
+		t.Fatalf("status = %+v", got.Status)
+	}
+}
+
+func TestClearSELKeepsLogWhenReadFails(t *testing.T) {
+	r, rec, f := inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionClearSEL))
+	rec.fail["sel elist"] = errors.New("Could not open device at /dev/ipmi0")
+	reconcileInBand(t, r)
+	if strings.Join(rec.calls, ",") != "sel elist" {
+		t.Fatalf("calls = %v", rec.calls)
+	}
+	if a := f.action("a1"); a.Status.Phase != bmcv1.PhaseFailed || !strings.Contains(a.Status.Message, "it was not cleared") {
+		t.Fatalf("status = %+v", a.Status)
 	}
 }

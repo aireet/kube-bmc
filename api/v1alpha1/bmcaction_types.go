@@ -1,36 +1,42 @@
 package v1alpha1
 
 import (
+	"slices"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PowerAction is an out-of-band power operation. Values follow the Redfish ResetType names.
-// +kubebuilder:validation:Enum=On;GracefulShutdown;GracefulRestart;ForceRestart;PowerCycle;ForceOff
-type PowerAction string
+// ActionType is an operation on a BMC. Power actions follow the Redfish ResetType names.
+// +kubebuilder:validation:Enum=On;GracefulShutdown;GracefulRestart;ForceRestart;PowerCycle;ForceOff;IdentifyOn;IdentifyOff;ClearSEL
+type ActionType string
 
 const (
-	ActionOn               PowerAction = "On"
-	ActionGracefulShutdown PowerAction = "GracefulShutdown"
-	ActionGracefulRestart  PowerAction = "GracefulRestart"
-	ActionForceRestart     PowerAction = "ForceRestart"
-	ActionPowerCycle       PowerAction = "PowerCycle"
-	ActionForceOff         PowerAction = "ForceOff"
+	ActionOn               ActionType = "On"
+	ActionGracefulShutdown ActionType = "GracefulShutdown"
+	ActionGracefulRestart  ActionType = "GracefulRestart"
+	ActionForceRestart     ActionType = "ForceRestart"
+	ActionPowerCycle       ActionType = "PowerCycle"
+	ActionForceOff         ActionType = "ForceOff"
+	// ActionIdentifyOn turns the chassis identify light on until ActionIdentifyOff.
+	ActionIdentifyOn  ActionType = "IdentifyOn"
+	ActionIdentifyOff ActionType = "IdentifyOff"
+	// ActionClearSEL archives the System Event Log to a ConfigMap and then clears it.
+	ActionClearSEL ActionType = "ClearSEL"
 )
 
-// PowerActions lists all supported actions.
-var PowerActions = []PowerAction{
+// PowerActions lists the actions that change the power state.
+var PowerActions = []ActionType{
 	ActionOn, ActionGracefulShutdown, ActionGracefulRestart, ActionForceRestart, ActionPowerCycle, ActionForceOff,
 }
 
+// Actions lists all supported actions.
+var Actions = append(slices.Clone(PowerActions), ActionIdentifyOn, ActionIdentifyOff, ActionClearSEL)
+
 // Valid reports whether a is a supported action.
-func (a PowerAction) Valid() bool {
-	for _, x := range PowerActions {
-		if a == x {
-			return true
-		}
-	}
-	return false
-}
+func (a ActionType) Valid() bool { return slices.Contains(Actions, a) }
+
+// IsPower reports whether a changes the power state.
+func (a ActionType) IsPower() bool { return slices.Contains(PowerActions, a) }
 
 // ActionPhase is the lifecycle phase of a BMCAction.
 // +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Rejected
@@ -49,14 +55,14 @@ func (p ActionPhase) Done() bool {
 	return p == PhaseSucceeded || p == PhaseFailed || p == PhaseRejected
 }
 
-// BMCActionSpec describes a requested power operation.
+// BMCActionSpec describes a requested operation.
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable"
 type BMCActionSpec struct {
 	// BMCName is the name of the target BMC object, which equals the node name.
 	// +kubebuilder:validation:MinLength=1
 	BMCName string `json:"bmcName"`
 
-	Action PowerAction `json:"action"`
+	Action ActionType `json:"action"`
 
 	// RequestedBy is the identity of the requester. The kube-bmc server and kubectl-bmc
 	// set it to the authenticated user.
@@ -78,14 +84,19 @@ type BMCActionStatus struct {
 	// PowerStateBefore is the power state reported by the node agent when execution started.
 	// +optional
 	PowerStateBefore PowerState `json:"powerStateBefore,omitempty"`
+	// SELArchive is the ConfigMap, as namespace/name, that holds the System Event Log
+	// saved by ClearSEL before the log was cleared.
+	// +optional
+	SELArchive string `json:"selArchive,omitempty"`
 	// +optional
 	StartTime *metav1.Time `json:"startTime,omitempty"`
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 }
 
-// BMCAction requests a power operation on a BMC. Actions are executed once by the
-// kube-bmc server and kept as an audit record until their TTL expires.
+// BMCAction requests an operation on a BMC: a power action, the identify light, or
+// clearing the System Event Log. Each action is executed once, by the node agent in-band
+// or by the kube-bmc server out-of-band, and kept as an audit record until its TTL expires.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=bmca

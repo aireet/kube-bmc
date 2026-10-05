@@ -3,6 +3,21 @@
 All notable changes to this project are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-10-05
+
+### Added
+- `IdentifyOn` and `IdentifyOff` actions turn the chassis identify light on until it is turned
+  off (255 seconds on BMCs without indefinite identify). Dashboard "Locate" menu,
+  `kubectl bmc locate`, MCP tool `locate_server`.
+- `ClearSEL` action saves the complete System Event Log to a ConfigMap owned by the action
+  (`status.selArchive`) and clears the log only after the archive was stored. Dashboard button in
+  the event log, `kubectl bmc clear-sel`, MCP tool `clear_sel`.
+- `POST /api/v1/bmcs/{name}/actions`; the `/power` path remains as an alias.
+
+### Changed
+- `server.actions.enabled` and `--enable-actions` replace `server.powerActions.enabled` and
+  `--enable-power-actions`, which are still accepted.
+
 ## [0.2.0] - 2026-10-05
 
 ### Added

@@ -17,12 +17,12 @@ import (
 )
 
 // PowerFunc executes a power action against a resolved target.
-type PowerFunc func(ctx context.Context, t oob.Target, a bmcv1.PowerAction) error
+type PowerFunc func(ctx context.Context, t oob.Target, a bmcv1.ActionType) error
 
-// ActionReconciler runs in the server. It rejects actions while power actions are
-// disabled, executes actions out-of-band that node agents cannot execute in-band (On,
-// GracefulRestart, and in-band actions not claimed within ClaimTimeout because the node
-// is down), and deletes finished actions after their TTL.
+// ActionReconciler runs in the server. It rejects actions while actions are disabled,
+// executes power actions out-of-band that node agents cannot execute in-band (On,
+// GracefulRestart, and in-band power actions not claimed within ClaimTimeout because the
+// node is down), and deletes finished actions after their TTL.
 //
 // Every executor claims an action with an optimistic-concurrency status update
 // (Pending→Running), so each action is executed at most once.
@@ -30,7 +30,7 @@ type ActionReconciler struct {
 	Client      client.Client
 	Credentials Credentials
 	Power       PowerFunc
-	// Enabled is the master switch for power actions. When false, new actions are rejected.
+	// Enabled is the master switch for actions. When false, new actions are rejected.
 	Enabled bool
 	// ClaimTimeout is how long in-band actions are left to the node agent.
 	ClaimTimeout time.Duration
@@ -72,11 +72,16 @@ func (r *ActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	if !r.Enabled {
-		return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseRejected, "power actions are disabled on this kube-bmc server")
+		return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseRejected, "actions are disabled on this kube-bmc server")
 	}
 	if InBand(a.Spec.Action) {
 		if wait := a.CreationTimestamp.Add(r.ClaimTimeout).Sub(r.now().Time); wait > 0 {
 			return ctrl.Result{RequeueAfter: wait}, nil // left to the node agent
+		}
+		if !a.Spec.Action.IsPower() {
+			return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseRejected, fmt.Sprintf(
+				"the node agent on %s did not execute the action within %s; %s is only available in-band",
+				a.Spec.BMCName, r.ClaimTimeout, a.Spec.Action))
 		}
 	}
 	bmc := &bmcv1.BMC{}

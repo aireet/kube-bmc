@@ -22,9 +22,10 @@ import (
 
 // Options configures the MCP server.
 type Options struct {
-	Backend      server.Backend
-	PowerActions bool
-	Version      string
+	Backend server.Backend
+	// Actions is true when BMCActions are accepted.
+	Actions bool
+	Version string
 }
 
 type tools struct{ Options }
@@ -84,6 +85,19 @@ func New(o Options) *mcp.Server {
 			"GracefulShutdown, ForceOff, ForceRestart and PowerCycle are executed by the node agent; On and GracefulRestart need out-of-band access.",
 		Annotations: &mcp.ToolAnnotations{Title: "Power action", DestructiveHint: ptr(true), IdempotentHint: false, OpenWorldHint: ptr(true)},
 	}, t.powerAction)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "locate_server",
+		Description: "Turn the chassis identify light of a server on or off so that data-center staff can find it. " +
+			"The light stays on until it is turned off. Executed by the node agent.",
+		Annotations: &mcp.ToolAnnotations{Title: "Locate server", DestructiveHint: ptr(false), IdempotentHint: true, OpenWorldHint: ptr(true)},
+	}, t.locateServer)
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "clear_sel",
+		Description: "Clear the System Event Log of a server after saving it to a ConfigMap. Use it when the log is full and new " +
+			"hardware events are being dropped, and only when the user asks. Executed by the node agent.",
+		Annotations: &mcp.ToolAnnotations{Title: "Clear the System Event Log", DestructiveHint: ptr(true), IdempotentHint: false, OpenWorldHint: ptr(true)},
+	}, t.clearSEL)
 
 	s.AddPrompt(&mcp.Prompt{
 		Name:        "diagnose_server",
@@ -288,7 +302,7 @@ func (t *tools) getEvents(ctx context.Context, req *mcp.CallToolRequest, in even
 type ActionSummary struct {
 	Name        string            `json:"name"`
 	BMC         string            `json:"bmc"`
-	Action      bmcv1.PowerAction `json:"action"`
+	Action      bmcv1.ActionType  `json:"action"`
 	RequestedBy string            `json:"requestedBy"`
 	Reason      string            `json:"reason,omitempty"`
 	Phase       bmcv1.ActionPhase `json:"phase"`
@@ -340,29 +354,55 @@ func (t *tools) getAction(ctx context.Context, req *mcp.CallToolRequest, in getA
 }
 
 type powerIn struct {
-	Name   string            `json:"name" jsonschema:"server (Kubernetes node) name"`
-	Action bmcv1.PowerAction `json:"action" jsonschema:"one of On, GracefulShutdown, GracefulRestart, ForceRestart, PowerCycle, ForceOff"`
-	Reason string            `json:"reason" jsonschema:"why the action is needed; recorded for auditing"`
+	Name   string           `json:"name" jsonschema:"server (Kubernetes node) name"`
+	Action bmcv1.ActionType `json:"action" jsonschema:"one of On, GracefulShutdown, GracefulRestart, ForceRestart, PowerCycle, ForceOff"`
+	Reason string           `json:"reason" jsonschema:"why the action is needed; recorded for auditing"`
 }
 
 func (t *tools) powerAction(ctx context.Context, req *mcp.CallToolRequest, in powerIn) (*mcp.CallToolResult, ActionSummary, error) {
 	id := identity(req)
-	if !t.PowerActions {
-		return nil, ActionSummary{}, errors.New("power actions are disabled on this kube-bmc server")
+	if !in.Action.IsPower() {
+		return nil, ActionSummary{}, fmt.Errorf("unsupported power action %q", in.Action)
 	}
-	if !in.Action.Valid() {
-		return nil, ActionSummary{}, fmt.Errorf("unsupported action %q", in.Action)
+	return t.request(ctx, id, in.Name, in.Action, in.Reason, true)
+}
+
+func (t *tools) request(ctx context.Context, id auth.Identity, name string, action bmcv1.ActionType, reason string, reasonRequired bool) (*mcp.CallToolResult, ActionSummary, error) {
+	if !t.Actions {
+		return nil, ActionSummary{}, errors.New("actions are disabled on this kube-bmc server")
 	}
-	if strings.TrimSpace(in.Reason) == "" {
+	if reasonRequired && strings.TrimSpace(reason) == "" {
 		return nil, ActionSummary{}, errors.New("reason is required")
 	}
 	a, err := t.Backend.CreateAction(ctx, server.ActionRequest{
-		BMC: in.Name, Action: in.Action, RequestedBy: id.Username, Reason: "[mcp] " + in.Reason,
+		BMC: name, Action: action, RequestedBy: id.Username, Reason: strings.TrimSpace("[mcp] " + reason),
 	})
 	if err != nil {
 		return nil, ActionSummary{}, err
 	}
 	return nil, summarizeAction(a), nil
+}
+
+type locateIn struct {
+	Name string `json:"name" jsonschema:"server (Kubernetes node) name"`
+	On   bool   `json:"on" jsonschema:"true turns the identify light on, false turns it off"`
+}
+
+func (t *tools) locateServer(ctx context.Context, req *mcp.CallToolRequest, in locateIn) (*mcp.CallToolResult, ActionSummary, error) {
+	action := bmcv1.ActionIdentifyOff
+	if in.On {
+		action = bmcv1.ActionIdentifyOn
+	}
+	return t.request(ctx, identity(req), in.Name, action, "", false)
+}
+
+type clearSELIn struct {
+	Name   string `json:"name" jsonschema:"server (Kubernetes node) name"`
+	Reason string `json:"reason" jsonschema:"why the log is cleared; recorded for auditing"`
+}
+
+func (t *tools) clearSEL(ctx context.Context, req *mcp.CallToolRequest, in clearSELIn) (*mcp.CallToolResult, ActionSummary, error) {
+	return t.request(ctx, identity(req), in.Name, bmcv1.ActionClearSEL, in.Reason, true)
 }
 
 func diagnosePrompt(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {

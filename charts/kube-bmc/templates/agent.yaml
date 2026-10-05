@@ -21,8 +21,8 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get"]
-  {{- if .Values.server.powerActions.enabled }}
-  # Execute power actions for the local node in-band.
+  {{- if include "kube-bmc.actionsEnabled" . }}
+  # Execute BMCActions for the local node in-band.
   - apiGroups: ["bmc.kube-bmc.io"]
     resources: ["bmcactions"]
     verbs: ["get", "list", "watch"]
@@ -45,6 +45,12 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "create", "update"]
+  {{- if include "kube-bmc.actionsEnabled" . }}
+  # SEL archives created by ClearSEL.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -120,8 +126,8 @@ spec:
             - --status-refresh={{ .Values.agent.statusRefresh }}
             - --lease-duration={{ .Values.agent.leaseDuration }}
             - --cache-dir=/cache
-            {{- if .Values.server.powerActions.enabled }}
-            - --enable-power-actions
+            {{- if include "kube-bmc.actionsEnabled" . }}
+            - --enable-actions
             {{- end }}
             - --log-level={{ .Values.agent.logLevel }}
           env:

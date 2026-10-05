@@ -19,7 +19,7 @@ import (
 
 // ipmiVerb maps actions to `ipmitool chassis power` sub-commands. IPMI has no
 // graceful restart, so GracefulRestart is only available over Redfish.
-var ipmiVerb = map[bmcv1.PowerAction]string{
+var ipmiVerb = map[bmcv1.ActionType]string{
 	bmcv1.ActionOn:               "on",
 	bmcv1.ActionGracefulShutdown: "soft",
 	bmcv1.ActionForceOff:         "off",
@@ -56,7 +56,7 @@ func TargetFor(b *bmcv1.BMC, creds Credentials) (Target, error) {
 }
 
 // Power executes a power action.
-func Power(ctx context.Context, t Target, a bmcv1.PowerAction) error {
+func Power(ctx context.Context, t Target, a bmcv1.ActionType) error {
 	if !a.Valid() {
 		return fmt.Errorf("unsupported action %q", a)
 	}

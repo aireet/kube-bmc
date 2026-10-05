@@ -41,15 +41,19 @@ server:
   staleAfter: 10m
   # Public base URL of the dashboard, e.g. https://kube-bmc.example.com. Required for OIDC.
   externalURL: ""
-  # Power actions (BMCAction). Shutdown, restart and power cycle are executed by the agent of
-  # the target node through its local BMC interface; no BMC credentials are needed. Power on
-  # needs out-of-band access (server.credentials). When disabled, actions are rejected.
-  # Enable authentication (auth.mode) before enabling power actions.
-  powerActions:
+  # BMCActions: power actions, the identify light and clearing the System Event Log.
+  # Shutdown, restart, power cycle, identify and ClearSEL are executed by the agent of the
+  # target node through its local BMC interface; no BMC credentials are needed. Power on and
+  # graceful restart need out-of-band access (server.credentials). When disabled, actions are
+  # rejected. Enable authentication (auth.mode) before enabling actions.
+  actions:
     enabled: false
     timeout: 2m
-    # How long finished BMCActions are kept as an audit record.
+    # How long finished BMCActions, and the SEL archives created by ClearSEL, are kept.
     ttl: 168h
+  # Deprecated: use server.actions. powerActions.enabled=true still enables actions.
+  powerActions:
+    enabled: false
   # Credentials for out-of-band (Redfish / IPMI-over-LAN) access, used by power actions.
   credentials:
     # Name of an existing Secret with `username` and `password` keys in the release namespace.

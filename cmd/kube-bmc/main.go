@@ -172,7 +172,8 @@ func runAgent(ctx context.Context, args []string) error {
 	statusRefresh := fs.Duration("status-refresh", 10*time.Minute, "maximum age of readings in the BMC status when they change only within their deadband")
 	leaseDuration := fs.Duration("lease-duration", 3*time.Minute, "validity of the heartbeat Lease; renewed every third of it")
 	namespace := fs.String("namespace", os.Getenv("POD_NAMESPACE"), "namespace of the heartbeat Lease (defaults to $POD_NAMESPACE)")
-	powerActions := fs.Bool("enable-power-actions", false, "execute power actions for this node through the local BMC interface")
+	actions := fs.Bool("enable-actions", false, "execute BMCActions for this node through the local BMC interface")
+	fs.BoolVar(actions, "enable-power-actions", false, "deprecated: use --enable-actions")
 	logLevel := fs.String("log-level", "info", "debug, info, warn or error")
 	_ = fs.Parse(args)
 
@@ -195,8 +196,8 @@ func runAgent(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	runner := ipmi.Exec{Path: *ipmitool}
-	if *powerActions {
+	ipmiClient := ipmi.NewClient(ipmi.Exec{Path: *ipmitool}, *cacheDir)
+	if *actions {
 		// The manager watches BMCActions only; everything else is read directly.
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 			Scheme:                 scheme(),
@@ -208,7 +209,7 @@ func runAgent(ctx context.Context, args []string) error {
 			return err
 		}
 		if err := (&controller.InBandReconciler{
-			Client: mgr.GetClient(), Node: *node, Runner: runner, Enabled: true, Timeout: 2 * time.Minute,
+			Client: mgr.GetClient(), Node: *node, IPMI: ipmiClient, Namespace: *namespace, Enabled: true, Timeout: 5 * time.Minute,
 		}).SetupWithManager(mgr); err != nil {
 			return err
 		}
@@ -218,12 +219,12 @@ func runAgent(ctx context.Context, args []string) error {
 			}
 		}()
 	}
-	col := collector.New(*node, ipmi.NewClient(runner, *cacheDir), collector.Options{
+	col := collector.New(*node, ipmiClient, collector.Options{
 		Interval: *interval, InventoryInterval: *invInterval, SELMinInterval: *selInterval, SELEntries: *selEntries,
 		CommandTimeout: 30 * time.Second, SELTimeout: 3 * time.Minute,
 	}, log)
 
-	log.Info("starting agent", "version", version, "powerActions", *powerActions)
+	log.Info("starting agent", "version", version, "actions", *actions)
 	return agent.New(k8s, col, agent.Options{
 		NodeName: *node, Namespace: *namespace, Listen: *listen, LeaseDuration: *leaseDuration,
 		StatusRefresh: *statusRefresh, MaxCollectionAge: 3**interval + 30*time.Second, Version: version,
@@ -237,7 +238,8 @@ func runServer(ctx context.Context, args []string) error {
 	agentSelector := fs.String("agent-selector", "app.kubernetes.io/name=kube-bmc,app.kubernetes.io/component=agent", "label selector of agent pods")
 	agentPort := fs.Int("agent-port", 9580, "agent HTTP port")
 	creds := fs.String("default-credentials", "", "Secret with username and password keys used for BMCs without spec.credentialsRef")
-	powerActions := fs.Bool("enable-power-actions", false, "accept power actions; when false they are rejected. Agents need the same flag")
+	actions := fs.Bool("enable-actions", false, "accept BMCActions (power, identify light, clearing the SEL); when false they are rejected. Agents need the same flag")
+	fs.BoolVar(actions, "enable-power-actions", false, "deprecated: use --enable-actions")
 	actionTimeout := fs.Duration("action-timeout", 2*time.Minute, "timeout of a single power action")
 	actionTTL := fs.Duration("action-ttl", 7*24*time.Hour, "how long finished BMCActions are kept; 0 keeps them forever")
 	claimTimeout := fs.Duration("in-band-claim-timeout", 30*time.Second, "how long in-band actions are left to the node agent before out-of-band access is used")
@@ -291,7 +293,7 @@ func runServer(ctx context.Context, args []string) error {
 	credentials := controller.Credentials{Reader: mgr.GetClient(), Namespace: *namespace, Default: *creds}
 	if err := (&controller.ActionReconciler{
 		Client: mgr.GetClient(), Credentials: credentials, Power: oob.Power,
-		Enabled: *powerActions, ClaimTimeout: *claimTimeout, Timeout: *actionTimeout, TTL: *actionTTL,
+		Enabled: *actions, ClaimTimeout: *claimTimeout, Timeout: *actionTimeout, TTL: *actionTTL,
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}
@@ -349,7 +351,7 @@ func runServer(ctx context.Context, args []string) error {
 	backend := server.NewKube(mgr.GetClient(), server.KubeOptions{
 		Namespace: *namespace, AgentSelector: sel, AgentPort: *agentPort, Credentials: credentials, StaleAfter: *staleAfter,
 	})
-	mcpSrv := mcpserver.New(mcpserver.Options{Backend: backend, PowerActions: *powerActions, Version: version})
+	mcpSrv := mcpserver.New(mcpserver.Options{Backend: backend, Actions: *actions, Version: version})
 	var mcpHandler http.Handler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv },
 		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	if authn.Enabled() {
@@ -362,7 +364,7 @@ func runServer(ctx context.Context, args []string) error {
 		Addr: *listen,
 		Handler: server.New(server.Options{
 			Backend: backend,
-			Config:  server.Config{Version: version, PowerActions: *powerActions, ClusterName: *clusterName, Auth: authn.Mode()},
+			Config:  server.Config{Version: version, Actions: *actions, ClusterName: *clusterName, Auth: authn.Mode()},
 			UI:      web.FS(), Authn: authn, MCP: mcpHandler, ProtectedResourceMetadata: prm, Log: log,
 		}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -378,7 +380,7 @@ func runServer(ctx context.Context, args []string) error {
 			errc <- err
 		}
 	}()
-	log.Info("serving", "addr", *listen, "version", version, "auth", *authMode, "powerActions", *powerActions)
+	log.Info("serving", "addr", *listen, "version", version, "auth", *authMode, "powerActions", *actions)
 
 	select {
 	case <-ctx.Done():
