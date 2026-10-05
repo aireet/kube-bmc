@@ -1,0 +1,346 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: bmcs.bmc.kube-bmc.io
+spec:
+  group: bmc.kube-bmc.io
+  names:
+    kind: BMC
+    listKind: BMCList
+    plural: bmcs
+    shortNames:
+    - bmcs
+    singular: bmc
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.nodeName
+      name: Node
+      type: string
+    - jsonPath: .status.network.ipAddress
+      name: BMC-IP
+      type: string
+    - jsonPath: .status.device.manufacturer
+      name: Vendor
+      type: string
+    - jsonPath: .status.device.product
+      name: Model
+      type: string
+    - jsonPath: .status.powerState
+      name: Power
+      type: string
+    - jsonPath: .status.powerWatts
+      name: Watts
+      type: integer
+    - jsonPath: .status.inletTemperature
+      name: Inlet
+      type: integer
+    - jsonPath: .status.health
+      name: Health
+      type: string
+    - jsonPath: .status.controller.firmwareVersion
+      name: Firmware
+      priority: 1
+      type: string
+    - jsonPath: .status.device.serialNumber
+      name: Serial
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: BMC represents the baseboard management controller of one Kubernetes
+          node.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              BMCSpec is the desired, user-owned configuration of a BMC.
+              The node agent creates the object with only nodeName set; everything else is optional.
+            properties:
+              address:
+                description: Address overrides the BMC address discovered in-band
+                  (IP or hostname, optional :port).
+                type: string
+              credentialsRef:
+                description: |-
+                  CredentialsRef selects the Secret used for out-of-band access.
+                  When empty, the server's default credentials Secret is used.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
+              insecureSkipVerify:
+                default: true
+                description: InsecureSkipVerify disables TLS verification for Redfish.
+                  Most BMCs ship self-signed certificates.
+                type: boolean
+              nodeName:
+                description: NodeName is the Kubernetes node this BMC belongs to.
+                type: string
+              protocol:
+                default: Redfish
+                description: Protocol used for out-of-band operations. Defaults to
+                  Redfish.
+                enum:
+                - Redfish
+                - IPMI
+                type: string
+            required:
+            - nodeName
+            type: object
+          status:
+            description: BMCStatus is observed state, written by the node agent.
+            properties:
+              agentVersion:
+                description: AgentVersion of the node agent that last reported.
+                type: string
+              chassis:
+                description: Chassis is the chassis power and fault state.
+                properties:
+                  faults:
+                    items:
+                      type: string
+                    type: array
+                  intrusionActive:
+                    type: boolean
+                  lastPowerEvent:
+                    type: string
+                  powerRestorePolicy:
+                    type: string
+                type: object
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              controller:
+                description: Controller describes the BMC itself.
+                properties:
+                  firmwareVersion:
+                    type: string
+                  guid:
+                    type: string
+                  ipmiVersion:
+                    type: string
+                  manufacturerID:
+                    type: string
+                  productID:
+                    type: string
+                type: object
+              device:
+                description: Device is the FRU inventory of the server.
+                properties:
+                  boardProduct:
+                    type: string
+                  boardSerial:
+                    type: string
+                  chassisSerial:
+                    type: string
+                  chassisType:
+                    type: string
+                  manufacturer:
+                    type: string
+                  partNumber:
+                    type: string
+                  product:
+                    type: string
+                  serialNumber:
+                    type: string
+                  version:
+                    type: string
+                type: object
+              health:
+                description: Health is the aggregated hardware health reported by
+                  a BMC.
+                enum:
+                - OK
+                - Warning
+                - Critical
+                - Unknown
+                type: string
+              inletTemperature:
+                description: InletTemperature in degrees Celsius.
+                format: int32
+                type: integer
+              lastUpdated:
+                description: LastUpdated is when the agent last reported, used to
+                  detect stale agents.
+                format: date-time
+                type: string
+              network:
+                description: Network is the BMC management network configuration.
+                properties:
+                  channel:
+                    type: integer
+                  gateway:
+                    type: string
+                  ipAddress:
+                    type: string
+                  macAddress:
+                    type: string
+                  netmask:
+                    type: string
+                  source:
+                    type: string
+                  vlan:
+                    type: string
+                type: object
+              powerState:
+                description: PowerState is the chassis power state.
+                enum:
+                - "On"
+                - "Off"
+                - Unknown
+                type: string
+              powerWatts:
+                description: PowerWatts is the instantaneous system power draw (DCMI).
+                format: int32
+                type: integer
+              problems:
+                description: Problems lists everything that is not healthy, worst
+                  first.
+                items:
+                  description: Problem is a human-readable reason that degrades health.
+                  properties:
+                    message:
+                      type: string
+                    severity:
+                      description: Health is the aggregated hardware health reported
+                        by a BMC.
+                      enum:
+                      - OK
+                      - Warning
+                      - Critical
+                      - Unknown
+                      type: string
+                    source:
+                      description: 'Source is what raised the problem: a sensor name,
+                        "chassis" or "sel".'
+                      type: string
+                  required:
+                  - message
+                  - severity
+                  - source
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              sel:
+                description: SEL summarizes the System Event Log.
+                properties:
+                  entries:
+                    type: integer
+                  lastAddTime:
+                    type: string
+                  usedPercent:
+                    type: integer
+                required:
+                - entries
+                - usedPercent
+                type: object
+              sensors:
+                description: SensorSummary counts sensors by state.
+                properties:
+                  critical:
+                    type: integer
+                  noReading:
+                    type: integer
+                  ok:
+                    type: integer
+                  total:
+                    type: integer
+                  warning:
+                    type: integer
+                required:
+                - critical
+                - noReading
+                - ok
+                - total
+                - warning
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

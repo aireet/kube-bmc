@@ -1,0 +1,74 @@
+image:
+  repository: ghcr.io/aireet/kube-bmc
+  # Defaults to the chart appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+agent:
+  # The agent reads the local BMC through /dev/ipmi0, which requires a privileged container.
+  # It only issues read-only IPMI commands (mc/lan/fru/chassis status, sdr, sel, dcmi).
+  enabled: true
+  interval: 30s
+  inventoryInterval: 10m
+  selMinInterval: 5m
+  selEntries: 100
+  statusInterval: 2m
+  logLevel: info
+  port: 9580
+  # Run on every node by default, including control planes. Narrow it down with nodeSelector/affinity
+  # if some nodes (VMs, cloud instances) have no BMC.
+  nodeSelector: {}
+  affinity: {}
+  tolerations:
+    - operator: Exists
+  priorityClassName: ""
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+  podAnnotations: {}
+
+server:
+  enabled: true
+  replicas: 1
+  logLevel: info
+  clusterName: ""
+  staleAfter: 10m
+  # Power on/off/reset from the dashboard and API. Off by default: anyone who can reach the
+  # dashboard could otherwise power off servers. Put an authenticating proxy in front before enabling.
+  powerActions:
+    enabled: false
+  # Credentials for out-of-band (Redfish / IPMI-over-LAN) access, used by power actions.
+  credentials:
+    # Name of an existing Secret with `username` and `password` keys in the release namespace.
+    existingSecret: ""
+    # Or let the chart create one (not recommended for production; prefer existingSecret).
+    create: false
+    username: ""
+    password: ""
+  service:
+    type: ClusterIP
+    port: 80
+    # Fixed node port when type is NodePort (30000-32767); empty picks a random one.
+    nodePort: ""
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: kube-bmc.example.com
+    tls: []
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { memory: 256Mi }
+  podAnnotations: {}
+
+metrics:
+  # Create a PodMonitor for the agents (requires the Prometheus Operator CRDs).
+  podMonitor:
+    enabled: false
+    interval: 60s
+    labels: {}

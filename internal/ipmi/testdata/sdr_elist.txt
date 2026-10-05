@@ -1,0 +1,219 @@
+Inlet_Temp       | 22h | unc |  7.0 | 44 degrees C
+GPU1_Temp        | 01h | ok  |  7.0 | 53 degrees C
+GPU2_Temp        | 02h | ok  |  7.0 | 53 degrees C
+GPU3_Temp        | 03h | ok  |  7.0 | 56 degrees C
+GPU4_Temp        | 04h | ok  |  7.0 | 52 degrees C
+GPU5_Temp        | 05h | ok  |  7.0 | 55 degrees C
+GPU6_Temp        | 06h | ok  |  7.0 | 53 degrees C
+GPU7_Temp        | 07h | ok  |  7.0 | 50 degrees C
+GPU8_Temp        | 0Bh | ok  |  7.0 | 47 degrees C
+R_Outlet_Temp    | 1Dh | ok  |  7.0 | 52 degrees C
+L_Outlet_Temp    | 1Eh | ok  |  7.0 | 54 degrees C
+OCP1_Temp        | 20h | ns  | 11.0 | No Reading
+CPU0_Inlet_Temp  | 23h | ok  |  7.0 | 46 degrees C
+CPU1_Inlet_Temp  | 24h | ok  |  7.0 | 42 degrees C
+P12V_PSU         | 28h | ok  |  7.0 | 12.31 Volts
+P3V3             | 2Ah | ok  |  7.0 | 3.29 Volts
+P5V              | 2Bh | ok  |  7.0 | 4.97 Volts
+PVNN_PCH         | 2Ch | ok  |  7.0 | 0.88 Volts
+P1V05_PCH        | 2Dh | ok  |  7.0 | 1.05 Volts
+P1V8_AUX         | 2Eh | ok  |  7.0 | 1.78 Volts
+P3V_BAT          | 2Fh | ok  |  7.0 | 3.14 Volts
+PVCCIN_CPU0      | 30h | ok  |  3.0 | 1.81 Volts
+PVCCIN_CPU1      | 31h | ok  |  3.1 | 1.81 Volts
+PVCCINFAON_CPU0  | 32h | ok  |  3.0 | 1.07 Volts
+PVCCINFAON_CPU1  | 33h | ok  |  3.1 | 1.10 Volts
+PVCCFA_EHV_CPU0  | 34h | ok  |  3.0 | 1.81 Volts
+PVCCFA_EHV_CPU1  | 35h | ok  |  3.1 | 1.81 Volts
+PVCCD_HV_CPU0    | 36h | ok  |  3.0 | 1.15 Volts
+PVCCD_HV_CPU1    | 37h | ok  |  3.1 | 1.15 Volts
+ChassisIntrusion | 45h | ok  | 23.0 | 
+OCP1 Presence    | 46h | ns  | 11.0 | No Reading
+RAID_RISER2_Temp | 4Ch | ns  |  7.1 | No Reading
+RAID_RISER1_Temp | 4Dh | ns  |  7.1 | No Reading
+PSU1_Status      | 55h | ok  | 10.0 | Presence detected
+PSU1_VIN         | 56h | ok  | 10.0 | 200 Volts
+PSU1_IIN         | 57h | ok  | 10.0 | 0.80 Amps
+PSU1_PIN         | 58h | ok  | 10.0 | 140 Watts
+PSU1_Fan         | 59h | ok  | 10.0 | 8000 RPM
+PSU1_Temp        | 5Ah | ok  | 10.0 | 50 degrees C
+PSU2_Status      | 5Dh | ok  | 10.1 | Presence detected
+PSU2_VIN         | 5Eh | ok  | 10.1 | 200 Volts
+PSU2_IIN         | 5Fh | ok  | 10.1 | 0.90 Amps
+PSU2_PIN         | 60h | ok  | 10.1 | 150 Watts
+PSU2_Fan         | 61h | ok  | 10.1 | 8000 RPM
+PSU2_Temp        | 62h | ok  | 10.1 | 50 degrees C
+PSU3_Status      | 38h | ok  | 10.2 | Presence detected
+PSU3_VIN         | 39h | ok  | 10.2 | 200 Volts
+PSU3_IIN         | 3Ah | ok  | 10.2 | 0.70 Amps
+PSU3_PIN         | 3Bh | ok  | 10.2 | 140 Watts
+PSU3_Fan         | 3Ch | ok  | 10.2 | 8000 RPM
+PSU3_Temp        | 3Dh | ok  | 10.2 | 50 degrees C
+PSU4_Status      | 3Fh | ok  | 10.3 | Presence detected
+PSU4_VIN         | 40h | ok  | 10.3 | 200 Volts
+PSU4_IIN         | 41h | ok  | 10.3 | 0.70 Amps
+PSU4_PIN         | 42h | ok  | 10.3 | 140 Watts
+PSU4_Fan         | 43h | ok  | 10.3 | 8000 RPM
+PSU4_Temp        | 44h | ok  | 10.3 | 50 degrees C
+PSU1_Alert       | B3h | ok  | 10.0 | 
+PSU2_Alert       | B4h | ok  | 10.1 | 
+PSU3_Alert       | B5h | ok  | 10.2 | 
+PSU4_Alert       | B6h | ok  | 10.3 | 
+PSU1_VOUT        | B7h | ok  | 10.0 | 12 Volts
+PSU1_IOUT        | B8h | ok  | 10.0 | 10 Amps
+PSU1_POUT        | B9h | ok  | 10.0 | 120 Watts
+PSU2_VOUT        | BAh | ok  | 10.0 | 12 Volts
+PSU2_IOUT        | BBh | ok  | 10.0 | 11 Amps
+PSU2_POUT        | BCh | ok  | 10.0 | 130 Watts
+PSU3_VOUT        | BDh | ok  | 10.0 | 12 Volts
+PSU3_IOUT        | BEh | ok  | 10.0 | 10 Amps
+PSU3_POUT        | BFh | ok  | 10.0 | 120 Watts
+PSU4_VOUT        | F1h | ok  | 10.0 | 12 Volts
+PSU4_IOUT        | F2h | ok  | 10.0 | 9 Amps
+PSU4_POUT        | F3h | ok  | 10.0 | 110 Watts
+PSU1_Presence    | FCh | ok  |  0.0 | 
+PSU2_Presence    | FDh | ok  |  0.0 | 
+PSU3_Presence    | FEh | ok  |  0.0 | 
+PSU4_Presence    | F0h | ok  |  0.0 | 
+PowerUnit        | 66h | ok  | 19.0 | 
+CPU0_TJMAX       | 6Bh | ok  |  3.0 | 97 degrees C
+CPU1_TJMAX       | 6Ch | ok  |  3.1 | 97 degrees C
+CPU0_Tmargin     | 6Dh | ok  |  3.0 | 26 degrees C
+CPU1_Tmargin     | 6Eh | ok  |  3.1 | 29 degrees C
+PCHThermal       | 77h | ok  |  3.0 | 52 degrees C
+CPU0_Temp        | 88h | ok  |  3.0 | 63 degrees C
+CPU1_Temp        | 89h | ok  |  3.1 | 59 degrees C
+CPU0_VR_TEMP     | 8Ah | ok  |  3.0 | 56 degrees C
+CPU1_VR_TEMP     | 8Bh | ok  |  3.0 | 52 degrees C
+CPU0_DIMMA0_Temp | 8Ch | ok  |  3.0 | 51 degrees C
+CPU0_DIMMA1_Temp | 8Dh | ns  |  3.0 | No Reading
+CPU0_DIMMB0_Temp | 8Eh | ns  |  3.0 | No Reading
+CPU0_DIMMB1_Temp | 8Fh | ns  |  3.0 | No Reading
+CPU0_DIMMC0_Temp | 90h | ok  |  3.0 | 47 degrees C
+CPU0_DIMMC1_Temp | 91h | ns  |  3.0 | No Reading
+CPU0_DIMMD0_Temp | 92h | ns  |  3.0 | No Reading
+CPU0_DIMMD1_Temp | 93h | ns  |  3.0 | No Reading
+CPU0_DIMME0_Temp | 94h | ok  |  3.0 | 54 degrees C
+CPU0_DIMME1_Temp | 95h | ns  |  3.0 | No Reading
+CPU0_DIMMF0_Temp | 96h | ns  |  3.0 | No Reading
+CPU0_DIMMF1_Temp | 97h | ns  |  3.0 | No Reading
+CPU0_DIMMG0_Temp | 98h | ok  |  3.0 | 54 degrees C
+CPU0_DIMMG1_Temp | 99h | ns  |  3.0 | No Reading
+CPU0_DIMMH0_Temp | 9Ah | ns  |  3.0 | No Reading
+CPU0_DIMMH1_Temp | 9Bh | ns  |  3.0 | No Reading
+CPU1_DIMMA0_Temp | A0h | ok  |  3.1 | 50 degrees C
+CPU1_DIMMA1_Temp | A1h | ns  |  3.1 | No Reading
+CPU1_DIMMB0_Temp | A2h | ns  |  3.1 | No Reading
+CPU1_DIMMB1_Temp | A3h | ns  |  3.1 | No Reading
+CPU1_DIMMC0_Temp | A4h | ok  |  3.1 | 50 degrees C
+CPU1_DIMMC1_Temp | A5h | ns  |  3.1 | No Reading
+CPU1_DIMMD0_Temp | A6h | ns  |  3.1 | No Reading
+CPU1_DIMMD1_Temp | A7h | ns  |  3.1 | No Reading
+CPU1_DIMME0_Temp | A8h | ok  |  3.1 | 49 degrees C
+CPU1_DIMME1_Temp | A9h | ns  |  3.1 | No Reading
+CPU1_DIMMF0_Temp | AAh | ns  |  3.1 | No Reading
+CPU1_DIMMF1_Temp | ABh | ns  |  3.1 | No Reading
+CPU1_DIMMG0_Temp | ACh | ok  |  3.1 | 49 degrees C
+CPU1_DIMMG1_Temp | ADh | ns  |  3.1 | No Reading
+CPU1_DIMMH0_Temp | AEh | ns  |  3.1 | No Reading
+CPU1_DIMMH1_Temp | AFh | ns  |  3.1 | No Reading
+SEL_Status       | B0h | ok  |  6.2 | Log full
+Watchdog2        | B1h | ok  |  0.0 | 
+FAN1_A           | C0h | ok  | 29.0 | 20000 RPM
+FAN1_B           | C1h | ok  | 29.1 | 18800 RPM
+FAN2_A           | C2h | ok  | 29.0 | 20000 RPM
+FAN2_B           | C3h | ok  | 29.0 | 18700 RPM
+FAN3_A           | C4h | ok  | 29.0 | 20000 RPM
+FAN3_B           | C5h | ok  | 29.0 | 18800 RPM
+FAN4_A           | C6h | ok  | 29.0 | 20000 RPM
+FAN4_B           | C7h | ok  | 29.0 | 18800 RPM
+FAN5_A           | C8h | ok  | 29.0 | 20000 RPM
+FAN5_B           | C9h | ok  | 29.0 | 18900 RPM
+FAN6_A           | CAh | ok  | 29.0 | 20000 RPM
+FAN6_B           | CBh | ok  | 29.0 | 18800 RPM
+FAN1_A Presence  | D8h | ok  | 29.0 | 
+FAN1_B Presence  | D9h | ok  | 29.1 | 
+FAN2_A Presence  | DAh | ok  | 29.2 | 
+FAN2_B Presence  | DBh | ok  | 29.3 | 
+FAN3_A Presence  | DCh | ok  | 29.4 | 
+FAN3_B Presence  | DDh | ok  | 29.5 | 
+FAN4_A Presence  | DEh | ok  | 29.6 | 
+FAN4_B Presence  | DFh | ok  | 29.7 | 
+FAN5_A Presence  | E0h | ok  | 29.8 | 
+FAN5_B Presence  | E1h | ok  | 29.9 | 
+FAN6_A Presence  | E2h | ok  | 29.10 | 
+FAN6_B Presence  | E3h | ok  | 29.11 | 
+FanBoard_Voltage | FAh | ok  |  7.0 | 12.24 Volts
+FanBoard_Power   | FBh | ok  |  3.0 | 256 Watts
+SATA0_Presence   | 6Fh | ok  |  4.4 | 
+SATA1_Presence   | 70h | ns  |  4.5 | No Reading
+SATA2_Presence   | 71h | ns  |  4.6 | No Reading
+SATA3_Presence   | 72h | ns  |  4.7 | No Reading
+SATA4_Presence   | 73h | ns  |  4.8 | No Reading
+SATA5_Presence   | 74h | ns  |  4.9 | No Reading
+SATA6_Presence   | 75h | ns  |  4.16 | No Reading
+SATA7_Presence   | 76h | ns  |  4.17 | No Reading
+RAID_SLOT7_Temp  | 4Eh | ns  |  7.1 | No Reading
+RAID_SLOT1_Temp  | 4Fh | ns  |  7.1 | No Reading
+CPU0 Presence    | 50h | ok  |  3.0 | 
+CPU1 Presence    | 51h | ok  |  3.1 | 
+CPU_Usage        | 6Ah | ok  |  3.0 | 1 percent
+CPU_Power        | 67h | ok  |  3.0 | 404 Watts
+FAN11            | D0h | lnr | 29.0 | 0 RPM
+FAN10_Presence   | E7h | ok  | 29.15 | Device Absent
+FAN11_Presence   | E8h | ok  | 29.16 | Device Absent
+FAN7             | CCh | lnr | 29.0 | 0 RPM
+FAN10            | CFh | lnr | 29.0 | 0 RPM
+FAN12_Presence   | E9h | ok  | 29.17 | Device Absent
+FAN9_Presence    | E6h | ok  | 29.14 | Device Absent
+FAN12            | D1h | lnr | 29.0 | 0 RPM
+FAN9             | CEh | ok  | 29.0 | 1300 RPM
+FAN7_Presence    | E4h | ok  | 29.12 | Device Absent
+FAN8             | CDh | lnr | 29.0 | 0 RPM
+FAN8_Presence    | E5h | ok  | 29.13 | Device Absent
+PSU5_Temp        | EAh | ok  | 10.4 | 51 degrees C
+PSU5_IOUT        | EDh | ok  | 10.0 | 9 Amps
+PSU5_Fan         | D7h | ok  | 10.4 | 9600 RPM
+PSU5_Presence    | D2h | ok  |  0.0 | 
+PSU5_VOUT        | ECh | ok  | 10.0 | 12 Volts
+PSU5_Status      | D3h | ok  | 10.4 | Presence detected
+PSU5_IIN         | D5h | ok  | 10.4 | 0.70 Amps
+PSU5_POUT        | EEh | ok  | 10.0 | 120 Watts
+PSU5_Alert       | EBh | ok  | 10.4 | 
+PSU5_VIN         | D4h | ok  | 10.4 | 200 Volts
+PSU5_PIN         | D6h | ok  | 10.4 | 140 Watts
+PSU6_Temp        | F9h | ok  | 10.5 | 52 degrees C
+PSU6_IOUT        | 0Ah | ok  | 10.0 | 10 Amps
+PSU6_Fan         | F8h | ok  | 10.5 | 11200 RPM
+PSU6_Presence    | EFh | ok  |  0.0 | 
+PSU6_VOUT        | 09h | ok  | 10.0 | 12 Volts
+PSU6_Status      | F4h | ok  | 10.5 | Presence detected
+PSU6_IIN         | F6h | ok  | 10.5 | 0.70 Amps
+PSU6_POUT        | 0Ch | ok  | 10.0 | 120 Watts
+PSU6_Alert       | 08h | ok  | 10.5 | 
+PSU6_VIN         | F5h | ok  | 10.5 | 200 Volts
+PSU6_PIN         | F7h | ok  | 10.5 | 150 Watts
+PSU7_Temp        | 13h | ok  | 10.6 | 53 degrees C
+PSU7_IOUT        | 16h | ok  | 10.0 | 10 Amps
+PSU7_Fan         | 12h | ok  | 10.6 | 12800 RPM
+PSU7_Presence    | 0Dh | ok  |  0.0 | 
+PSU7_VOUT        | 15h | ok  | 10.0 | 12 Volts
+PSU7_Status      | 0Eh | ok  | 10.6 | Presence detected
+PSU7_IIN         | 10h | ok  | 10.6 | 0.70 Amps
+PSU7_POUT        | 17h | ok  | 10.0 | 120 Watts
+PSU7_Alert       | 14h | ok  | 10.6 | 
+PSU7_VIN         | 0Fh | ok  | 10.6 | 200 Volts
+PSU7_PIN         | 11h | ok  | 10.6 | 150 Watts
+PSU8_Temp        | 21h | ok  | 10.7 | 53 degrees C
+PSU8_IOUT        | 27h | ok  | 10.0 | 10 Amps
+PSU8_Fan         | 1Fh | ok  | 10.7 | 12800 RPM
+PSU8_Presence    | 18h | ok  |  0.0 | 
+PSU8_VOUT        | 26h | ok  | 10.0 | 12 Volts
+PSU8_Status      | 19h | ok  | 10.7 | Presence detected
+PSU8_IIN         | 1Bh | ok  | 10.7 | 0.80 Amps
+PSU8_POUT        | 29h | ok  | 10.0 | 120 Watts
+PSU8_Alert       | 25h | ok  | 10.7 | 
+PSU8_VIN         | 1Ah | ok  | 10.7 | 200 Volts
+PSU8_PIN         | 1Ch | ok  | 10.7 | 140 Watts
+FanBoard_12038_V | 47h | ns  |  7.0 | No Reading
+FanBoard_12038_P | 48h | ns  |  3.0 | No Reading

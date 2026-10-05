@@ -1,0 +1,200 @@
+{{- if .Values.server.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-server
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-server
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["bmc.kube-bmc.io"]
+    resources: ["bmcs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-server
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kube-bmc.fullname" . }}-server
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kube-bmc.fullname" . }}-server
+    namespace: {{ .Release.Namespace }}
+---
+# Agent pods and credential Secrets are only read in the release namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-server
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "secrets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-server
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "kube-bmc.fullname" . }}-server
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kube-bmc.fullname" . }}-server
+    namespace: {{ .Release.Namespace }}
+{{- if and .Values.server.credentials.create (not .Values.server.credentials.existingSecret) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-credentials
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  username: {{ required "server.credentials.username is required" .Values.server.credentials.username | quote }}
+  password: {{ required "server.credentials.password is required" .Values.server.credentials.password | quote }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-server
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  replicas: {{ .Values.server.replicas }}
+  selector:
+    matchLabels: {{- include "kube-bmc.selector" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels: {{- include "kube-bmc.selector" . | nindent 8 }}
+        app.kubernetes.io/component: server
+      {{- with .Values.server.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "kube-bmc.fullname" . }}-server
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: server
+          image: {{ include "kube-bmc.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - server
+            - --listen=:8080
+            - --agent-selector=app.kubernetes.io/name=kube-bmc,app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=agent
+            - --agent-port={{ .Values.agent.port }}
+            - --stale-after={{ .Values.server.staleAfter }}
+            - --log-level={{ .Values.server.logLevel }}
+            {{- with .Values.server.clusterName }}
+            - --cluster-name={{ . }}
+            {{- end }}
+            {{- with include "kube-bmc.credentialsSecret" . }}
+            - --default-credentials={{ . }}
+            {{- end }}
+            {{- if .Values.server.powerActions.enabled }}
+            - --enable-power-actions
+            {{- end }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources: {{- toYaml .Values.server.resources | nindent 12 }}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.server.service.type }}
+  selector: {{- include "kube-bmc.selector" . | nindent 4 }}
+    app.kubernetes.io/component: server
+  ports:
+    - name: http
+      port: {{ .Values.server.service.port }}
+      targetPort: http
+      {{- if and (eq .Values.server.service.type "NodePort") .Values.server.service.nodePort }}
+      nodePort: {{ .Values.server.service.nodePort }}
+      {{- end }}
+{{- if .Values.server.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+  {{- with .Values.server.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.server.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.server.ingress.tls }}
+  tls: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.server.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "kube-bmc.fullname" . }}
+                port: { name: http }
+{{- end }}
+{{- end }}

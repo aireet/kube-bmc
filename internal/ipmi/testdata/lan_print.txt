@@ -1,0 +1,33 @@
+Set in Progress         : Set Complete
+Auth Type Support       : 
+Auth Type Enable        : Callback : 
+                        : User     : 
+                        : Operator : 
+                        : Admin    : 
+                        : OEM      : 
+IP Address Source       : Static Address
+IP Address              : 10.20.0.31
+Subnet Mask             : 255.255.255.0
+MAC Address             : aa:bb:cc:00:11:22
+SNMP Community String   : AMI
+IP Header               : TTL=0x40 Flags=0x40 Precedence=0x00 TOS=0x10
+BMC ARP Control         : ARP Responses Enabled, Gratuitous ARP Disabled
+Gratituous ARP Intrvl   : 1.0 seconds
+Default Gateway IP      : 10.20.0.1
+Default Gateway MAC     : aa:bb:cc:00:00:01
+Backup Gateway IP       : 0.0.0.0
+Backup Gateway MAC      : 00:00:00:00:00:00
+802.1q VLAN ID          : Disabled
+802.1q VLAN Priority    : 0
+RMCP+ Cipher Suites     : 
+Cipher Suite Priv Max   : XXXaXXXXXXXaXXX
+                        :     X=Cipher Suite Unused
+                        :     c=CALLBACK
+                        :     u=USER
+                        :     o=OPERATOR
+                        :     a=ADMIN
+                        :     O=OEM
+Bad Password Threshold  : 5
+Invalid password disable: yes
+Attempt Count Reset Int.: 300
+User Lockout Interval   : 300

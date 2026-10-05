@@ -1,0 +1,40 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kube-bmc
+  namespace: kube-bmc-system
+spec:
+  groups:
+    - name: kube-bmc
+      rules:
+        - alert: BMCHardwareCritical
+          expr: kube_bmc_health == 3
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "Hardware on {{ $labels.node }} is critical"
+            description: "Run `kubectl get bmc {{ $labels.node }} -o jsonpath='{.status.problems}'` for details."
+        - alert: BMCHardwareWarning
+          expr: kube_bmc_health == 2
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "Hardware on {{ $labels.node }} reports warnings"
+        - alert: BMCUnreachable
+          expr: kube_bmc_up == 0
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "kube-bmc agent on {{ $labels.node }} cannot read its BMC"
+        - alert: BMCEventLogFull
+          expr: kube_bmc_sel_used_ratio > 0.9
+          for: 1h
+          labels: { severity: warning }
+          annotations:
+            summary: "SEL on {{ $labels.node }} is {{ $value | humanizePercentage }} full; new hardware events will be lost"
+        - alert: BMCChassisFault
+          expr: kube_bmc_chassis_fault == 1
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.fault }} on {{ $labels.node }}"

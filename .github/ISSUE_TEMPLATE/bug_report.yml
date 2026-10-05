@@ -1,0 +1,24 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+    validations: { required: true }
+  - type: textarea
+    attributes:
+      label: What did you expect?
+  - type: input
+    attributes:
+      label: kube-bmc version
+    validations: { required: true }
+  - type: input
+    attributes:
+      label: Server / BMC (vendor, model, BMC firmware)
+      placeholder: Dell PowerEdge R760, iDRAC 9 7.10.50.00
+  - type: textarea
+    attributes:
+      label: Relevant output
+      description: "`kubectl get bmc <name> -o yaml`, agent logs, or raw ipmitool output (remove serials, MACs and IPs)."
+      render: shell

@@ -1,0 +1,11 @@
+apiVersion: v2
+name: kube-bmc
+description: Kubernetes-native BMC management — discover, monitor and control server BMCs from inside your cluster.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/aireet/kube-bmc
+sources:
+  - https://github.com/aireet/kube-bmc
+keywords: [bmc, ipmi, redfish, baremetal, hardware, monitoring]
+icon: https://raw.githubusercontent.com/aireet/kube-bmc/main/docs/images/logo.svg

@@ -1,0 +1,8 @@
+.git
+bin
+ui/node_modules
+web/dist/*
+!web/dist/.gitkeep
+*.md
+docs
+charts

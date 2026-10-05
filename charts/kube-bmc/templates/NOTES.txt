@@ -1,0 +1,8 @@
+kube-bmc is installed.
+
+  Agents:   one per node, publishing BMC objects     →  kubectl get bmc
+  Dashboard:
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kube-bmc.fullname" . }} 8080:{{ .Values.server.service.port }}
+    open http://localhost:8080
+
+Power actions are {{ if .Values.server.powerActions.enabled }}ENABLED — make sure the dashboard is behind authentication{{ else }}disabled (server.powerActions.enabled=false){{ end }}.

@@ -1,0 +1,219 @@
+Inlet_Temp       | 46.000     | degrees C  | nc    | 0.000     | 0.000     | 0.000     | 40.000    | 50.000    | 65.000    
+GPU1_Temp        | 54.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | na        | na        | 100.000   
+GPU2_Temp        | 55.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | na        | na        | 100.000   
+GPU3_Temp        | 58.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | na        | na        | 100.000   
+GPU4_Temp        | 55.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | na        | na        | 100.000   
+GPU5_Temp        | 59.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | na        | na        | 100.000   
+GPU6_Temp        | 54.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | na        | na        | 100.000   
+GPU7_Temp        | 53.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | na        | na        | 100.000   
+GPU8_Temp        | 50.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | na        | na        | 100.000   
+R_Outlet_Temp    | 53.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+L_Outlet_Temp    | 55.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+OCP1_Temp        | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 55.000    | 60.000    | 65.000    
+CPU0_Inlet_Temp  | 47.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+CPU1_Inlet_Temp  | 43.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+P12V_PSU         | 12.312     | Volts      | ok    | 10.260    | 10.716    | 10.944    | 13.224    | 13.452    | 13.908    
+P3V3             | 3.294      | Volts      | ok    | 2.867     | 2.928     | 3.050     | 3.538     | 3.660     | 3.721     
+P5V              | 4.968      | Volts      | ok    | 4.324     | 4.416     | 4.600     | 5.428     | 5.520     | 5.704     
+PVNN_PCH         | 0.878      | Volts      | ok    | 0.781     | 0.805     | 0.830     | 1.000     | 1.025     | 1.049     
+P1V05_PCH        | 1.025      | Volts      | ok    | 0.903     | 0.927     | 0.952     | 1.147     | 1.171     | 1.220     
+P1V8_AUX         | 1.781      | Volts      | ok    | 1.562     | 1.610     | 1.635     | 1.928     | 2.001     | 2.050     
+P3V_BAT          | 3.139      | Volts      | ok    | 2.628     | 2.701     | 2.774     | 3.650     | 3.796     | 3.869     
+PVCCIN_CPU0      | 1.806      | Volts      | ok    | 1.318     | 1.366     | 1.391     | 2.001     | 2.050     | 2.123     
+PVCCIN_CPU1      | 1.806      | Volts      | ok    | 1.318     | 1.366     | 1.391     | 2.001     | 2.050     | 2.123     
+PVCCINFAON_CPU0  | 1.074      | Volts      | ok    | 0.781     | 0.805     | 0.830     | 1.147     | 1.171     | 1.220     
+PVCCINFAON_CPU1  | 1.098      | Volts      | ok    | 0.781     | 0.805     | 0.830     | 1.147     | 1.171     | 1.220     
+PVCCFA_EHV_CPU0  | 1.806      | Volts      | ok    | 1.440     | 1.488     | 1.537     | 2.001     | 2.050     | 2.123     
+PVCCFA_EHV_CPU1  | 1.806      | Volts      | ok    | 1.440     | 1.488     | 1.537     | 2.001     | 2.050     | 2.123     
+PVCCD_HV_CPU0    | 1.147      | Volts      | ok    | 0.952     | 0.976     | 1.000     | 1.269     | 1.318     | 1.342     
+PVCCD_HV_CPU1    | 1.147      | Volts      | ok    | 0.952     | 0.976     | 1.000     | 1.269     | 1.318     | 1.342     
+ChassisIntrusion | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+OCP1 Presence    | na         | discrete   | na    | na        | na        | na        | na        | na        | na        
+RAID_RISER2_Temp | na         | degrees C  | na    | na        | na        | na        | na        | na        | 105.000   
+RAID_RISER1_Temp | na         | degrees C  | na    | na        | na        | na        | na        | na        | 105.000   
+PSU1_Status      | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+PSU1_VIN         | 200.000    | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU1_IIN         | 0.800      | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU1_PIN         | 150.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU1_Fan         | 9600.000   | RPM        | ok    | na        | na        | na        | na        | na        | na        
+PSU1_Temp        | 51.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+PSU2_Status      | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+PSU2_VIN         | 200.000    | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU2_IIN         | 0.800      | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU2_PIN         | 170.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU2_Fan         | 9600.000   | RPM        | ok    | na        | na        | na        | na        | na        | na        
+PSU2_Temp        | 51.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+PSU3_Status      | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+PSU3_VIN         | 200.000    | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU3_IIN         | 0.700      | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU3_PIN         | 150.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU3_Fan         | 9600.000   | RPM        | ok    | na        | na        | na        | na        | na        | na        
+PSU3_Temp        | 51.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+PSU4_Status      | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+PSU4_VIN         | 200.000    | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU4_IIN         | 0.700      | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU4_PIN         | 140.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU4_Fan         | 9600.000   | RPM        | ok    | na        | na        | na        | na        | na        | na        
+PSU4_Temp        | 51.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+PSU1_Alert       | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU2_Alert       | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU3_Alert       | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU4_Alert       | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU1_VOUT        | 12.000     | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU1_IOUT        | 10.000     | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU1_POUT        | 130.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU2_VOUT        | 12.000     | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU2_IOUT        | 11.000     | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU2_POUT        | 140.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU3_VOUT        | 12.000     | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU3_IOUT        | 10.000     | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU3_POUT        | 130.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU4_VOUT        | 12.000     | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU4_IOUT        | 9.000      | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU4_POUT        | 120.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU1_Presence    | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU2_Presence    | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU3_Presence    | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU4_Presence    | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PowerUnit        | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+CPU0_TJMAX       | 97.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+CPU1_TJMAX       | 97.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+CPU0_Tmargin     | 25.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+CPU1_Tmargin     | 28.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+PCHThermal       | 56.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 85.000    | 95.000    | 105.000   
+CPU0_Temp        | 63.000     | degrees C  | ok    | na        | na        | na        | 94.000    | 95.000    | 96.000    
+CPU1_Temp        | 60.000     | degrees C  | ok    | na        | na        | na        | 94.000    | 95.000    | 96.000    
+CPU0_VR_TEMP     | 57.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 100.000   | 115.000   | 125.000   
+CPU1_VR_TEMP     | 53.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 100.000   | 115.000   | 125.000   
+CPU0_DIMMA0_Temp | 52.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMA1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMB0_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMB1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMC0_Temp | 48.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMC1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMD0_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMD1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMME0_Temp | 55.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMME1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMF0_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMF1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMG0_Temp | 56.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMG1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMH0_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU0_DIMMH1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMA0_Temp | 51.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMA1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMB0_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMB1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMC0_Temp | 51.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMC1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMD0_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMD1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMME0_Temp | 50.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMME1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMF0_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMF1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMG0_Temp | 50.000     | degrees C  | ok    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMG1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMH0_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+CPU1_DIMMH1_Temp | na         | degrees C  | na    | 0.000     | 0.000     | 0.000     | 83.000    | 84.000    | 85.000    
+SEL_Status       | 0x0        | discrete   | 0x1080| na        | na        | na        | na        | na        | na        
+Watchdog2        | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN1_A           | 20000.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN1_B           | 18800.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN2_A           | 20000.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN2_B           | 18700.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN3_A           | 20000.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN3_B           | 18800.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN4_A           | 20000.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN4_B           | 18800.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN5_A           | 20000.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN5_B           | 18900.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN6_A           | 20000.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN6_B           | 18800.000  | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN1_A Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN1_B Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN2_A Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN2_B Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN3_A Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN3_B Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN4_A Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN4_B Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN5_A Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN5_B Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN6_A Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FAN6_B Presence  | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+FanBoard_Voltage | 12.240     | Volts      | ok    | 10.440    | 10.800    | 11.160    | 13.020    | 13.380    | 13.740    
+FanBoard_Power   | 256.000    | Watts      | ok    | na        | na        | na        | 1200.000  | 1296.000  | 1400.000  
+SATA0_Presence   | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+SATA1_Presence   | na         | discrete   | na    | na        | na        | na        | na        | na        | na        
+SATA2_Presence   | na         | discrete   | na    | na        | na        | na        | na        | na        | na        
+SATA3_Presence   | na         | discrete   | na    | na        | na        | na        | na        | na        | na        
+SATA4_Presence   | na         | discrete   | na    | na        | na        | na        | na        | na        | na        
+SATA5_Presence   | na         | discrete   | na    | na        | na        | na        | na        | na        | na        
+SATA6_Presence   | na         | discrete   | na    | na        | na        | na        | na        | na        | na        
+SATA7_Presence   | na         | discrete   | na    | na        | na        | na        | na        | na        | na        
+RAID_SLOT7_Temp  | na         | degrees C  | na    | na        | na        | na        | na        | na        | 105.000   
+RAID_SLOT1_Temp  | na         | degrees C  | na    | na        | na        | na        | na        | na        | 105.000   
+CPU0 Presence    | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+CPU1 Presence    | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+CPU_Usage        | 1.000      | percent    | ok    | na        | na        | na        | 101.000   | 102.000   | 103.000   
+CPU_Power        | 400.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+FAN11            | 0.000      | RPM        | nr    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN10_Presence   | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+FAN11_Presence   | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+FAN7             | 0.000      | RPM        | nr    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN10            | 0.000      | RPM        | nr    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN12_Presence   | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+FAN9_Presence    | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+FAN12            | 0.000      | RPM        | nr    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN9             | 1300.000   | RPM        | ok    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN7_Presence    | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+FAN8             | 0.000      | RPM        | nr    | 0.000     | 100.000   | 200.000   | na        | na        | na        
+FAN8_Presence    | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+PSU5_Temp        | 52.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+PSU5_IOUT        | 10.000     | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU5_Fan         | 11200.000  | RPM        | ok    | na        | na        | na        | na        | na        | na        
+PSU5_Presence    | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU5_VOUT        | 12.000     | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU5_Status      | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+PSU5_IIN         | 0.800      | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU5_POUT        | 130.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU5_Alert       | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU5_VIN         | 200.000    | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU5_PIN         | 150.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU6_Temp        | 53.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+PSU6_IOUT        | 10.000     | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU6_Fan         | 12800.000  | RPM        | ok    | na        | na        | na        | na        | na        | na        
+PSU6_Presence    | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU6_VOUT        | 12.000     | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU6_Status      | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+PSU6_IIN         | 0.900      | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU6_POUT        | 120.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU6_Alert       | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU6_VIN         | 200.000    | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU6_PIN         | 150.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU7_Temp        | 54.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+PSU7_IOUT        | 10.000     | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU7_Fan         | 14400.000  | RPM        | ok    | na        | na        | na        | na        | na        | na        
+PSU7_Presence    | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU7_VOUT        | 12.000     | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU7_Status      | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+PSU7_IIN         | 0.800      | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU7_POUT        | 130.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU7_Alert       | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU7_VIN         | 200.000    | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU7_PIN         | 150.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU8_Temp        | 54.000     | degrees C  | ok    | na        | na        | na        | na        | na        | na        
+PSU8_IOUT        | 10.000     | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU8_Fan         | 14400.000  | RPM        | ok    | na        | na        | na        | na        | na        | na        
+PSU8_Presence    | na         | discrete   | na    | na        | na        | na        | na        | na        | na        
+PSU8_VOUT        | 12.000     | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU8_Status      | 0x0        | discrete   | 0x0180| na        | na        | na        | na        | na        | na        
+PSU8_IIN         | 0.700      | Amps       | ok    | na        | na        | na        | na        | na        | na        
+PSU8_POUT        | 120.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+PSU8_Alert       | 0x0        | discrete   | 0x0080| na        | na        | na        | na        | na        | na        
+PSU8_VIN         | 200.000    | Volts      | ok    | na        | na        | na        | na        | na        | na        
+PSU8_PIN         | 150.000    | Watts      | ok    | na        | na        | na        | na        | na        | na        
+FanBoard_12038_V | na         | Volts      | na    | 10.440    | 10.800    | 11.160    | 13.020    | 13.380    | 13.740    
+FanBoard_12038_P | na         | Watts      | na    | na        | na        | na        | 396.000   | 408.000   | 432.000   

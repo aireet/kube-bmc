@@ -1,0 +1,116 @@
+{{- if .Values.agent.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-agent
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["bmc.kube-bmc.io"]
+    resources: ["bmcs"]
+    verbs: ["get", "create"]
+  - apiGroups: ["bmc.kube-bmc.io"]
+    resources: ["bmcs/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-agent
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kube-bmc.fullname" . }}-agent
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kube-bmc.fullname" . }}-agent
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "kube-bmc.fullname" . }}-agent
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "kube-bmc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  selector:
+    matchLabels: {{- include "kube-bmc.selector" . | nindent 6 }}
+      app.kubernetes.io/component: agent
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 10%
+  template:
+    metadata:
+      labels: {{- include "kube-bmc.selector" . | nindent 8 }}
+        app.kubernetes.io/component: agent
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.agent.port | quote }}
+        {{- with .Values.agent.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      serviceAccountName: {{ include "kube-bmc.fullname" . }}-agent
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: {{ include "kube-bmc.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - agent
+            - --listen=:{{ .Values.agent.port }}
+            - --interval={{ .Values.agent.interval }}
+            - --inventory-interval={{ .Values.agent.inventoryInterval }}
+            - --sel-min-interval={{ .Values.agent.selMinInterval }}
+            - --sel-entries={{ .Values.agent.selEntries }}
+            - --status-interval={{ .Values.agent.statusInterval }}
+            - --cache-dir=/cache
+            - --log-level={{ .Values.agent.logLevel }}
+          env:
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          ports:
+            - name: http
+              containerPort: {{ .Values.agent.port }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          securityContext:
+            # Needed to open /dev/ipmi0 on the host.
+            privileged: true
+            readOnlyRootFilesystem: true
+          resources: {{- toYaml .Values.agent.resources | nindent 12 }}
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+      volumes:
+        - name: cache
+          emptyDir: { sizeLimit: 16Mi }
+      {{- with .Values.agent.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

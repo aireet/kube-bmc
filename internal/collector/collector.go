@@ -1,0 +1,237 @@
+// Package collector polls the local BMC on three cadences and keeps the latest Snapshot in memory:
+//
+//   - fast (sensors, chassis, power, SEL info): cheap, ~1s per round with an SDR cache
+//   - inventory (FRU, LAN, firmware, thresholds): rarely changes, `ipmitool sensor` alone takes ~10s
+//   - SEL entries: walking the log over KCS can take 30s+, so it is only re-read when `sel info` shows a new event
+package collector
+
+import (
+	"context"
+	"log/slog"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/aireet/kube-bmc/internal/ipmi"
+)
+
+// Snapshot is everything the agent knows about its BMC. It is served as-is by the agent's HTTP API.
+type Snapshot struct {
+	Node        string                     `json:"node"`
+	CollectedAt time.Time                  `json:"collectedAt"`
+	MC          ipmi.MCInfo                `json:"mc"`
+	GUID        string                     `json:"guid,omitempty"`
+	LAN         ipmi.LAN                   `json:"lan"`
+	FRU         ipmi.FRU                   `json:"fru"`
+	Chassis     ipmi.Chassis               `json:"chassis"`
+	SELInfo     ipmi.SELInfo               `json:"selInfo"`
+	PowerWatts  int                        `json:"powerWatts"`
+	Sensors     []ipmi.Sensor              `json:"sensors"`
+	Events      []ipmi.Event               `json:"events"`
+	Thresholds  map[string]ipmi.Thresholds `json:"-"`
+	// Errors holds the last error per collection phase; an empty map means everything worked.
+	Errors map[string]string `json:"errors,omitempty"`
+}
+
+type Options struct {
+	Interval          time.Duration
+	InventoryInterval time.Duration
+	SELMinInterval    time.Duration
+	SELEntries        int
+	CommandTimeout    time.Duration
+	SELTimeout        time.Duration
+}
+
+type Collector struct {
+	client *ipmi.Client
+	opts   Options
+	log    *slog.Logger
+
+	mu        sync.RWMutex
+	snap      Snapshot
+	selReadAt time.Time
+	selSeenAt string // Last Add Time when the SEL was last read
+	selBusy   bool
+	updates   chan struct{}
+}
+
+func New(node string, client *ipmi.Client, opts Options, log *slog.Logger) *Collector {
+	return &Collector{
+		client:  client,
+		opts:    opts,
+		log:     log,
+		snap:    Snapshot{Node: node, PowerWatts: -1, Errors: map[string]string{}},
+		updates: make(chan struct{}, 1),
+	}
+}
+
+// Updates fires (coalesced) after every collection round.
+func (c *Collector) Updates() <-chan struct{} { return c.updates }
+
+// Snapshot returns a deep-enough copy of the latest state with thresholds merged into sensors.
+func (c *Collector) Snapshot() Snapshot {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	s := c.snap
+	s.Sensors = make([]ipmi.Sensor, len(c.snap.Sensors))
+	for i, sn := range c.snap.Sensors {
+		if t, ok := c.snap.Thresholds[sn.Name]; ok {
+			sn.Thresholds = &t
+		}
+		s.Sensors[i] = sn
+	}
+	s.Events = slices.Clone(c.snap.Events)
+	s.Errors = make(map[string]string, len(c.snap.Errors))
+	for k, v := range c.snap.Errors {
+		s.Errors[k] = v
+	}
+	return s
+}
+
+// Ready reports whether at least one full round has completed.
+func (c *Collector) Ready() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return !c.snap.CollectedAt.IsZero()
+}
+
+func (c *Collector) Run(ctx context.Context) {
+	c.step(ctx, "sdr-cache", c.opts.SELTimeout, func(ctx context.Context) error { return c.client.RefreshSDRCache(ctx) })
+	c.inventory(ctx)
+	c.fast(ctx)
+
+	fast := time.NewTicker(c.opts.Interval)
+	inv := time.NewTicker(c.opts.InventoryInterval)
+	defer fast.Stop()
+	defer inv.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-fast.C:
+			c.fast(ctx)
+		case <-inv.C:
+			c.step(ctx, "sdr-cache", c.opts.SELTimeout, func(ctx context.Context) error { return c.client.RefreshSDRCache(ctx) })
+			c.inventory(ctx)
+		}
+	}
+}
+
+// step runs one phase with its own timeout and records the error, if any.
+func (c *Collector) step(ctx context.Context, phase string, timeout time.Duration, fn func(context.Context) error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	start := time.Now()
+	err := fn(ctx)
+	observe(phase, time.Since(start), err)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err != nil {
+		if c.snap.Errors[phase] != err.Error() {
+			c.log.Warn("collection failed", "phase", phase, "err", err)
+		}
+		c.snap.Errors[phase] = err.Error()
+	} else {
+		delete(c.snap.Errors, phase)
+	}
+}
+
+func (c *Collector) inventory(ctx context.Context) {
+	t := c.opts.CommandTimeout
+	c.step(ctx, "mc", t, func(ctx context.Context) error {
+		mc, err := c.client.MCInfo(ctx)
+		guid, _ := c.client.GUID(ctx)
+		c.set(func(s *Snapshot) { s.MC, s.GUID = mc, guid })
+		return err
+	})
+	c.step(ctx, "lan", t, func(ctx context.Context) error {
+		lan, err := c.client.LAN(ctx)
+		if err == nil {
+			c.set(func(s *Snapshot) { s.LAN = lan })
+		}
+		return err
+	})
+	c.step(ctx, "fru", t, func(ctx context.Context) error {
+		fru, err := c.client.FRU(ctx)
+		c.set(func(s *Snapshot) { s.FRU = fru })
+		return err
+	})
+	c.step(ctx, "thresholds", c.opts.SELTimeout, func(ctx context.Context) error {
+		th, err := c.client.Thresholds(ctx)
+		if err == nil {
+			c.set(func(s *Snapshot) { s.Thresholds = th })
+		}
+		return err
+	})
+}
+
+func (c *Collector) fast(ctx context.Context) {
+	t := c.opts.CommandTimeout
+	c.step(ctx, "chassis", t, func(ctx context.Context) error {
+		ch, err := c.client.Chassis(ctx)
+		if err == nil {
+			c.set(func(s *Snapshot) { s.Chassis = ch })
+		}
+		return err
+	})
+	c.step(ctx, "power", t, func(ctx context.Context) error {
+		w, err := c.client.Power(ctx)
+		c.set(func(s *Snapshot) { s.PowerWatts = w })
+		return err
+	})
+	c.step(ctx, "sensors", t, func(ctx context.Context) error {
+		sn, err := c.client.Sensors(ctx)
+		if err == nil {
+			c.set(func(s *Snapshot) { s.Sensors = sn })
+		}
+		return err
+	})
+	c.step(ctx, "sel-info", t, func(ctx context.Context) error {
+		info, err := c.client.SELInfo(ctx)
+		if err == nil {
+			c.set(func(s *Snapshot) { s.SELInfo = info })
+		}
+		return err
+	})
+	c.set(func(s *Snapshot) { s.CollectedAt = time.Now() })
+	c.maybeReadSEL(ctx)
+
+	select {
+	case c.updates <- struct{}{}:
+	default:
+	}
+}
+
+// maybeReadSEL starts a background SEL read when the log changed and the rate limit allows it.
+func (c *Collector) maybeReadSEL(ctx context.Context) {
+	c.mu.Lock()
+	last := c.snap.SELInfo.LastAddTime
+	due := !c.selBusy && last != c.selSeenAt && time.Since(c.selReadAt) >= c.opts.SELMinInterval
+	if due {
+		c.selBusy = true
+	}
+	c.mu.Unlock()
+	if !due {
+		return
+	}
+	go func() {
+		c.step(ctx, "sel", c.opts.SELTimeout, func(ctx context.Context) error {
+			ev, err := c.client.SEL(ctx, c.opts.SELEntries)
+			if err == nil {
+				slices.Reverse(ev) // newest first
+				c.set(func(s *Snapshot) { s.Events = ev })
+			}
+			return err
+		})
+		c.mu.Lock()
+		c.selBusy, c.selReadAt, c.selSeenAt = false, time.Now(), last
+		c.mu.Unlock()
+	}()
+}
+
+func (c *Collector) set(fn func(*Snapshot)) {
+	c.mu.Lock()
+	fn(&c.snap)
+	c.mu.Unlock()
+}

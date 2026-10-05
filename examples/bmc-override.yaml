@@ -1,0 +1,9 @@
+# Override how the server reaches one BMC out-of-band.
+# The agent creates the object; patch only the fields you need:
+#   kubectl patch bmc gpu-01 --type merge --patch-file examples/bmc-override.yaml
+spec:
+  address: bmc-gpu-01.mgmt.example.com:443
+  protocol: Redfish
+  credentialsRef:
+    name: bmc-gpu-01
+  insecureSkipVerify: true

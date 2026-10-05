@@ -1,0 +1,16 @@
+ Chassis Type          : Rack Mount Chassis
+ Chassis Part Number   : 1.01.008.0001
+ Chassis Serial        : CHS0000000000000000001
+ Chassis Extra         : RMC8112-910-01_V1.0
+ Board Mfg Date        : Sun Nov 16 16:00:00 2025
+ Board Mfg             : Gooxi
+ Board Product         : G4DCT_PCBA
+ Board Serial          : BRD000000000000001
+ Board Part Number     : 1.21.224.0048
+ Board Extra           : G4DCT_PCBA_VER.B
+ Product Manufacturer  : Gooxi
+ Product Name          : SY8108G-G4
+ Product Part Number   : 0.91.008.1016
+ Product Version       : V1.0
+ Product Serial        : SRV0000000000000000001
+ Product Extra         : SY8108G-G4_V1.0
