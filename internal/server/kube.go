@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
+	"github.com/aireet/kube-bmc/internal/agent"
 	"github.com/aireet/kube-bmc/internal/collector"
 	"github.com/aireet/kube-bmc/internal/controller"
 )
@@ -32,7 +34,8 @@ type KubeOptions struct {
 	AgentSelector labels.Selector
 	AgentPort     int
 	Credentials   controller.Credentials
-	StaleAfter    time.Duration
+	// StaleAfter applies to agents that do not renew a heartbeat Lease.
+	StaleAfter time.Duration
 }
 
 // Kube is the Backend for a live cluster. Reads go through an informer cache.
@@ -59,6 +62,10 @@ func (k *Kube) List(ctx context.Context) ([]View, error) {
 	if err != nil {
 		return nil, err
 	}
+	leases, err := k.leases(ctx)
+	if err != nil {
+		return nil, err
+	}
 	byNode := make(map[string]*corev1.Node, len(nodes.Items))
 	for i := range nodes.Items {
 		byNode[nodes.Items[i].Name] = &nodes.Items[i]
@@ -66,7 +73,7 @@ func (k *Kube) List(ctx context.Context) ([]View, error) {
 	views := make([]View, 0, len(bmcs.Items))
 	for i := range bmcs.Items {
 		b := &bmcs.Items[i]
-		views = append(views, k.view(ctx, b, byNode[b.Spec.NodeName], pods[b.Spec.NodeName]))
+		views = append(views, k.view(ctx, b, byNode[b.Spec.NodeName], pods[b.Spec.NodeName], leases[b.Spec.NodeName]))
 	}
 	slices.SortFunc(views, func(a, b View) int { return strings.Compare(a.Name, b.Name) })
 	return views, nil
@@ -86,7 +93,11 @@ func (k *Kube) Get(ctx context.Context, name string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	return k.view(ctx, b, node, pods[b.Spec.NodeName]), nil
+	leases, err := k.leases(ctx)
+	if err != nil {
+		return View{}, err
+	}
+	return k.view(ctx, b, node, pods[b.Spec.NodeName], leases[b.Spec.NodeName]), nil
 }
 
 func (k *Kube) Live(ctx context.Context, name string) (*collector.Snapshot, error) {
@@ -194,9 +205,31 @@ func (k *Kube) agents(ctx context.Context) (map[string]*corev1.Pod, error) {
 	return res, nil
 }
 
-func (k *Kube) view(ctx context.Context, b *bmcv1.BMC, node *corev1.Node, pod *corev1.Pod) View {
+// leases returns the agent heartbeat Lease for each node.
+func (k *Kube) leases(ctx context.Context) (map[string]*coordinationv1.Lease, error) {
+	var list coordinationv1.LeaseList
+	if err := k.client.List(ctx, &list, client.InNamespace(k.opts.Namespace), client.HasLabels{agent.LeaseLabel}); err != nil {
+		return nil, err
+	}
+	res := make(map[string]*coordinationv1.Lease, len(list.Items))
+	for i := range list.Items {
+		res[list.Items[i].Name] = &list.Items[i]
+	}
+	return res, nil
+}
+
+func (k *Kube) view(ctx context.Context, b *bmcv1.BMC, node *corev1.Node, pod *corev1.Pod, lease *coordinationv1.Lease) View {
 	v := View{Name: b.Name, Created: b.CreationTimestamp, Spec: b.Spec, Status: b.Status}
-	if lu := b.Status.LastUpdated; lu == nil || time.Since(lu.Time) > k.opts.StaleAfter {
+	switch {
+	case lease != nil:
+		v.Stale = agent.LeaseExpired(lease, time.Now())
+		if lease.Spec.RenewTime != nil {
+			v.LastSeen = &metav1.Time{Time: lease.Spec.RenewTime.Time}
+		}
+	case b.Status.LastUpdated != nil:
+		v.LastSeen = b.Status.LastUpdated
+		v.Stale = time.Since(b.Status.LastUpdated.Time) > k.opts.StaleAfter
+	default:
 		v.Stale = true
 	}
 	if node != nil {

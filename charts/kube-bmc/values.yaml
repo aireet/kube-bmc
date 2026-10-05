@@ -14,7 +14,11 @@ agent:
   inventoryInterval: 10m
   selMinInterval: 5m
   selEntries: 100
-  statusInterval: 2m
+  # Readings (power, inlet temperature, SEL counters) are written to the BMC status when
+  # they leave their deadband or after this interval. Other changes are written immediately.
+  statusRefresh: 10m
+  # Validity of the agent heartbeat Lease; renewed every third of it.
+  leaseDuration: 3m
   logLevel: info
   port: 9580
   # Run on every node by default, including control planes. Narrow it down with nodeSelector/affinity

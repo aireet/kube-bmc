@@ -50,10 +50,10 @@ type Metrics struct{ C *Collector }
 
 // NewRegistry returns a registry where every metric carries a constant `node` label,
 // so alerts work regardless of how Prometheus discovers the agents.
-func NewRegistry(c *Collector) *prometheus.Registry {
+func NewRegistry(c *Collector, extra ...prometheus.Collector) *prometheus.Registry {
 	reg := prometheus.NewRegistry()
 	prometheus.WrapRegistererWith(prometheus.Labels{"node": c.snap.Node}, reg).
-		MustRegister(phaseDuration, phaseErrors, Metrics{c})
+		MustRegister(append([]prometheus.Collector{phaseDuration, phaseErrors, Metrics{c}}, extra...)...)
 	return reg
 }
 

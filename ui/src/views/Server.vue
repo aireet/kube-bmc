@@ -74,7 +74,7 @@ const selColor = computed(() => {
           </div>
           <div class="subtitle muted">
             {{ s.device?.manufacturer || '—' }} {{ s.device?.product }} · BMC {{ s.controller?.firmwareVersion || '—' }}
-            · {{ t('updated') }} {{ ago(s.lastUpdated) }} {{ t('ago') }}
+            · {{ t('lastSeen') }} {{ ago(v.lastSeen ?? s.lastUpdated) }} {{ t('ago') }}
           </div>
         </div>
         <div class="hero-stats tnum">

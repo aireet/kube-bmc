@@ -90,6 +90,13 @@ func (c *Collector) Snapshot() Snapshot {
 	return s
 }
 
+// Fresh reports whether a collection round completed within maxAge.
+func (c *Collector) Fresh(maxAge time.Duration) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return !c.snap.CollectedAt.IsZero() && time.Since(c.snap.CollectedAt) <= maxAge
+}
+
 // Ready reports whether at least one full round has completed.
 func (c *Collector) Ready() bool {
 	c.mu.RLock()

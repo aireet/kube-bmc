@@ -21,6 +21,7 @@ import (
 	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -92,6 +93,27 @@ func scheme() *runtime.Scheme {
 	return s
 }
 
+// discoverOIDC retries provider discovery with backoff for up to two minutes, so that a
+// provider that starts at the same time does not put the server into CrashLoopBackOff.
+func discoverOIDC(ctx context.Context, log *slog.Logger, cfg auth.OIDCConfig) (*auth.OIDC, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	delay := time.Second
+	for {
+		o, err := auth.NewOIDC(ctx, cfg)
+		if err == nil {
+			return o, nil
+		}
+		log.Warn("OIDC discovery failed; retrying", "issuer", cfg.IssuerURL, "in", delay, "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(delay):
+		}
+		delay = min(2*delay, 15*time.Second)
+	}
+}
+
 // envOr returns the environment variable key, or def when it is unset.
 func envOr(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok {
@@ -120,13 +142,18 @@ func runAgent(ctx context.Context, args []string) error {
 	invInterval := fs.Duration("inventory-interval", 10*time.Minute, "FRU, LAN, firmware and threshold polling interval")
 	selInterval := fs.Duration("sel-min-interval", 5*time.Minute, "minimum time between SEL reads; the SEL is only read after it changed")
 	selEntries := fs.Int("sel-entries", 100, "number of most recent SEL entries to keep")
-	statusInterval := fs.Duration("status-interval", 2*time.Minute, "maximum time between status writes when only readings changed")
+	statusRefresh := fs.Duration("status-refresh", 10*time.Minute, "maximum age of readings in the BMC status when they change only within their deadband")
+	leaseDuration := fs.Duration("lease-duration", 3*time.Minute, "validity of the heartbeat Lease; renewed every third of it")
+	namespace := fs.String("namespace", os.Getenv("POD_NAMESPACE"), "namespace of the heartbeat Lease (defaults to $POD_NAMESPACE)")
 	logLevel := fs.String("log-level", "info", "debug, info, warn or error")
 	_ = fs.Parse(args)
 
 	log := logger(*logLevel).With("node", *node)
 	if *node == "" {
 		return errors.New("--node-name or $NODE_NAME is required")
+	}
+	if *namespace == "" {
+		return errors.New("--namespace or $POD_NAMESPACE is required")
 	}
 	if _, err := os.Stat("/dev/ipmi0"); err != nil {
 		log.Warn("/dev/ipmi0 not found; load the ipmi_si and ipmi_devintf kernel modules on the host")
@@ -146,7 +173,10 @@ func runAgent(ctx context.Context, args []string) error {
 	}, log)
 
 	log.Info("starting agent", "version", version)
-	return agent.New(k8s, col, agent.Options{NodeName: *node, Listen: *listen, StatusInterval: *statusInterval, Version: version}, log).Run(ctx)
+	return agent.New(k8s, col, agent.Options{
+		NodeName: *node, Namespace: *namespace, Listen: *listen, LeaseDuration: *leaseDuration,
+		StatusRefresh: *statusRefresh, MaxCollectionAge: 3**interval + 30*time.Second, Version: version,
+	}, log).Run(ctx)
 }
 
 func runServer(ctx context.Context, args []string) error {
@@ -159,7 +189,7 @@ func runServer(ctx context.Context, args []string) error {
 	powerActions := fs.Bool("enable-power-actions", false, "execute BMCActions; when false they are rejected")
 	actionTimeout := fs.Duration("action-timeout", 2*time.Minute, "timeout of a single power action")
 	actionTTL := fs.Duration("action-ttl", 7*24*time.Hour, "how long finished BMCActions are kept; 0 keeps them forever")
-	staleAfter := fs.Duration("stale-after", 10*time.Minute, "mark a BMC stale when its agent has not reported for this long")
+	staleAfter := fs.Duration("stale-after", 15*time.Minute, "mark a BMC stale when its agent has neither a heartbeat Lease nor reported for this long")
 	clusterName := fs.String("cluster-name", "", "cluster name shown in the dashboard")
 	externalURL := fs.String("external-url", "", "public base URL of the dashboard, e.g. https://kube-bmc.example.com")
 	authMode := fs.String("auth", "none", "authentication mode: none or oidc")
@@ -197,8 +227,9 @@ func runServer(ctx context.Context, args []string) error {
 		Metrics:                metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress: "0",
 		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
-			&corev1.Pod{}:    {Namespaces: map[string]cache.Config{*namespace: {}}, Label: sel},
-			&corev1.Secret{}: {Namespaces: map[string]cache.Config{*namespace: {}}},
+			&corev1.Pod{}:           {Namespaces: map[string]cache.Config{*namespace: {}}, Label: sel},
+			&corev1.Secret{}:        {Namespaces: map[string]cache.Config{*namespace: {}}},
+			&coordinationv1.Lease{}: {Namespaces: map[string]cache.Config{*namespace: {}}},
 		}},
 	})
 	if err != nil {
@@ -226,7 +257,7 @@ func runServer(ctx context.Context, args []string) error {
 		if len(secret) < 32 {
 			return errors.New("--session-secret or $SESSION_SECRET of at least 32 bytes is required with --auth=oidc")
 		}
-		o, err := auth.NewOIDC(ctx, auth.OIDCConfig{
+		o, err := discoverOIDC(ctx, log, auth.OIDCConfig{
 			IssuerURL: *issuer, ClientID: *clientID, ClientSecret: envOr("OIDC_CLIENT_SECRET", *clientSecret),
 			RedirectURL: base + "/auth/callback", Scopes: splitList(*scopes),
 			UsernameClaim: *usernameClaim, GroupsClaim: *groupsClaim,

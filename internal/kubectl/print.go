@@ -59,7 +59,7 @@ func age(t time.Time) string {
 	return duration.HumanDuration(time.Since(t))
 }
 
-func printBMCs(w io.Writer, items []bmcv1.BMC, wide, color bool) {
+func printBMCs(w io.Writer, items []bmcv1.BMC, seen map[string]time.Time, wide, color bool) {
 	if len(items) == 0 {
 		fmt.Fprintln(w, "No BMCs found.")
 		return
@@ -67,7 +67,7 @@ func printBMCs(w io.Writer, items []bmcv1.BMC, wide, color bool) {
 	t := newTable(w)
 	header := "NAME\tHEALTH\tPOWER\tWATTS\tINLET\tVENDOR\tMODEL\tBMC-IP\tPROBLEMS"
 	if wide {
-		header += "\tFIRMWARE\tSERIAL\tLAST-REPORT"
+		header += "\tFIRMWARE\tSERIAL\tLAST-SEEN"
 	}
 	fmt.Fprintln(t, header)
 	for _, b := range items {
@@ -83,7 +83,9 @@ func printBMCs(w io.Writer, items []bmcv1.BMC, wide, color bool) {
 			int32Text(s.InletTemperature, "°C"), orDash(s.Device.Manufacturer), orDash(s.Device.Product), orDash(s.Network.IPAddress), problems}
 		if wide {
 			last := "-"
-			if s.LastUpdated != nil {
+			if t, ok := seen[b.Spec.NodeName]; ok {
+				last = age(t)
+			} else if s.LastUpdated != nil {
 				last = age(s.LastUpdated.Time)
 			}
 			row = append(row, orDash(s.Controller.FirmwareVersion), orDash(s.Device.SerialNumber), last)

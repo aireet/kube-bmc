@@ -14,15 +14,18 @@ import (
 	"testing/fstest"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
+	"github.com/aireet/kube-bmc/internal/agent"
 	"github.com/aireet/kube-bmc/internal/auth"
 	"github.com/aireet/kube-bmc/internal/collector"
 	"github.com/aireet/kube-bmc/internal/controller"
@@ -33,7 +36,7 @@ const ns = "kube-bmc-system"
 
 // newTestBackend returns a Kube backend over a fake client holding one node, its BMC
 // and its agent pod, whose snapshot API is served by an httptest server.
-func newTestBackend(t *testing.T) (*Kube, client.Client) {
+func newTestBackend(t *testing.T, extra ...client.Object) (*Kube, client.Client) {
 	t.Helper()
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		v := 55.0
@@ -59,7 +62,7 @@ func newTestBackend(t *testing.T) (*Kube, client.Client) {
 		Spec:       corev1.PodSpec{NodeName: "gpu-01"},
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning, PodIP: host},
 	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(b, node, pod).WithStatusSubresource(&bmcv1.BMC{}).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append([]client.Object{b, node, pod}, extra...)...).WithStatusSubresource(&bmcv1.BMC{}).Build()
 	return NewKube(c, KubeOptions{
 		Namespace: ns, AgentSelector: labels.SelectorFromSet(labels.Set{"app": "agent"}), AgentPort: agentPort,
 		Credentials: controller.Credentials{Reader: c, Namespace: ns}, StaleAfter: time.Hour,
@@ -141,6 +144,31 @@ func TestReadEndpoints(t *testing.T) {
 	}
 	if rec := do(t, h, "", "GET", "/api/v1/bmcs", ""); rec.Code != 401 {
 		t.Fatalf("unauthenticated: %d", rec.Code)
+	}
+}
+
+func TestStaleness(t *testing.T) {
+	lease := func(renewed time.Duration) *coordinationv1.Lease {
+		return &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: "gpu-01", Namespace: ns, Labels: map[string]string{agent.LeaseLabel: "true"}},
+			Spec: coordinationv1.LeaseSpec{
+				RenewTime:            &metav1.MicroTime{Time: time.Now().Add(-renewed)},
+				LeaseDurationSeconds: ptr.To(int32(120)),
+			},
+		}
+	}
+	for name, tc := range map[string]struct {
+		lease *coordinationv1.Lease
+		stale bool
+	}{
+		"valid lease":   {lease(30 * time.Second), false},
+		"expired lease": {lease(5 * time.Minute), true},
+	} {
+		backend, _ := newTestBackend(t, tc.lease)
+		v, err := backend.Get(context.Background(), "gpu-01")
+		if err != nil || v.Stale != tc.stale || v.LastSeen == nil {
+			t.Errorf("%s: stale = %v, lastSeen = %v, err = %v", name, v.Stale, v.LastSeen, err)
+		}
 	}
 }
 

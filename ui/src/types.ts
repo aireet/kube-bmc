@@ -65,6 +65,7 @@ export interface View {
   status: BMCStatus
   node?: NodeInfo
   agent?: { pod: string; ip: string; ready: boolean }
+  lastSeen?: string
   stale: boolean
   oobConfigured: boolean
 }

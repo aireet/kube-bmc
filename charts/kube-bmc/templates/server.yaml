@@ -60,6 +60,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "secrets"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -139,36 +142,36 @@ spec:
             - server
             - --listen=:8080
             - --agent-selector=app.kubernetes.io/name=kube-bmc,app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=agent
-            - --agent-port={{ .Values.agent.port }}
-            - --stale-after={{ .Values.server.staleAfter }}
-            - --log-level={{ .Values.server.logLevel }}
+            - {{ printf "--agent-port=%v" (.Values.agent.port) | quote }}
+            - {{ printf "--stale-after=%v" (.Values.server.staleAfter) | quote }}
+            - {{ printf "--log-level=%v" (.Values.server.logLevel) | quote }}
             {{- with .Values.server.clusterName }}
-            - --cluster-name={{ . }}
+            - {{ printf "--cluster-name=%v" (.) | quote }}
             {{- end }}
             {{- with include "kube-bmc.credentialsSecret" . }}
-            - --default-credentials={{ . }}
+            - {{ printf "--default-credentials=%v" (.) | quote }}
             {{- end }}
             {{- if .Values.server.powerActions.enabled }}
             - --enable-power-actions
             {{- end }}
-            - --action-timeout={{ .Values.server.powerActions.timeout }}
-            - --action-ttl={{ .Values.server.powerActions.ttl }}
+            - {{ printf "--action-timeout=%v" (.Values.server.powerActions.timeout) | quote }}
+            - {{ printf "--action-ttl=%v" (.Values.server.powerActions.ttl) | quote }}
             {{- with .Values.server.externalURL }}
-            - --external-url={{ . }}
+            - {{ printf "--external-url=%v" (.) | quote }}
             {{- end }}
-            - --auth={{ .Values.auth.mode }}
+            - {{ printf "--auth=%v" (.Values.auth.mode) | quote }}
             {{- if eq .Values.auth.mode "oidc" }}
-            - --kubernetes-tokens={{ .Values.auth.kubernetesTokens }}
-            - --session-ttl={{ .Values.auth.sessionTTL }}
-            - --oidc-issuer-url={{ required "auth.oidc.issuerURL is required" .Values.auth.oidc.issuerURL }}
-            - --oidc-client-id={{ .Values.auth.oidc.clientID }}
-            - --oidc-scopes={{ .Values.auth.oidc.scopes }}
-            - --oidc-username-claim={{ .Values.auth.oidc.usernameClaim }}
-            - --oidc-groups-claim={{ .Values.auth.oidc.groupsClaim }}
-            - --oidc-username-prefix={{ .Values.auth.oidc.usernamePrefix }}
-            - --oidc-groups-prefix={{ .Values.auth.oidc.groupsPrefix }}
+            - {{ printf "--kubernetes-tokens=%v" (.Values.auth.kubernetesTokens) | quote }}
+            - {{ printf "--session-ttl=%v" (.Values.auth.sessionTTL) | quote }}
+            - {{ printf "--oidc-issuer-url=%v" (required "auth.oidc.issuerURL is required" .Values.auth.oidc.issuerURL) | quote }}
+            - {{ printf "--oidc-client-id=%v" (.Values.auth.oidc.clientID) | quote }}
+            - {{ printf "--oidc-scopes=%v" (.Values.auth.oidc.scopes) | quote }}
+            - {{ printf "--oidc-username-claim=%v" (.Values.auth.oidc.usernameClaim) | quote }}
+            - {{ printf "--oidc-groups-claim=%v" (.Values.auth.oidc.groupsClaim) | quote }}
+            - {{ printf "--oidc-username-prefix=%v" (.Values.auth.oidc.usernamePrefix) | quote }}
+            - {{ printf "--oidc-groups-prefix=%v" (.Values.auth.oidc.groupsPrefix) | quote }}
             {{- with .Values.auth.oidc.extraAudiences }}
-            - --oidc-extra-audiences={{ join "," . }}
+            - {{ printf "--oidc-extra-audiences=%v" (join "," .) | quote }}
             {{- end }}
             {{- end }}
           env:

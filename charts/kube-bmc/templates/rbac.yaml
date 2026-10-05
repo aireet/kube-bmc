@@ -27,8 +27,8 @@ rules:
     resources: ["bmcactions"]
     verbs: ["create"]
 ---
-# Live sensor and event data is read from the agents through the API server's pod proxy
-# (kubectl bmc sensors/events). This is granted in the kube-bmc namespace only.
+# kubectl bmc reads live data from the agents through the API server's pod proxy and
+# agent heartbeats from their Leases. This is granted in the kube-bmc namespace only.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -42,6 +42,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods/proxy"]
     verbs: ["get"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["list"]
 {{- range $role, $subjects := dict "viewer" .Values.rbac.viewers "operator" .Values.rbac.operators }}
 {{- if $subjects }}
 ---

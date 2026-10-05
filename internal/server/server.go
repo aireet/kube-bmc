@@ -48,7 +48,9 @@ type View struct {
 	Status  bmcv1.BMCStatus `json:"status"`
 	Node    *NodeInfo       `json:"node,omitempty"`
 	Agent   *AgentInfo      `json:"agent,omitempty"`
-	// Stale is set when the agent has not reported within the configured window.
+	// LastSeen is the last heartbeat of the node agent.
+	LastSeen *metav1.Time `json:"lastSeen,omitempty"`
+	// Stale is set when the agent heartbeat has expired.
 	Stale bool `json:"stale"`
 	// OOBConfigured is set when out-of-band credentials are available for this BMC.
 	OOBConfigured bool `json:"oobConfigured"`

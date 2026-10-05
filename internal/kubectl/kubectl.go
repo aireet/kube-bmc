@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
+	"github.com/aireet/kube-bmc/internal/agent"
 	"github.com/aireet/kube-bmc/internal/collector"
 )
 
@@ -41,6 +42,8 @@ type Clients struct {
 	Snapshot func(ctx context.Context, node string) (*collector.Snapshot, error)
 	// Whoami returns the authenticated Kubernetes username.
 	Whoami func(ctx context.Context) (string, error)
+	// LastSeen returns the last agent heartbeat per node. It may be nil.
+	LastSeen func(ctx context.Context) (map[string]time.Time, error)
 }
 
 type options struct {
@@ -110,6 +113,19 @@ func (o *options) kubeClients() (*Clients, error) {
 		Client: c,
 		Snapshot: func(ctx context.Context, node string) (*collector.Snapshot, error) {
 			return agentSnapshot(ctx, cs, o.namespace, node)
+		},
+		LastSeen: func(ctx context.Context) (map[string]time.Time, error) {
+			leases, err := cs.CoordinationV1().Leases(o.namespace).List(ctx, metav1.ListOptions{LabelSelector: agent.LeaseLabel})
+			if err != nil {
+				return nil, err
+			}
+			seen := map[string]time.Time{}
+			for _, l := range leases.Items {
+				if l.Spec.RenewTime != nil {
+					seen[l.Name] = l.Spec.RenewTime.Time
+				}
+			}
+			return seen, nil
 		},
 		Whoami: func(ctx context.Context) (string, error) {
 			r, err := cs.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authenticationv1.SelfSubjectReview{}, metav1.CreateOptions{})
@@ -187,7 +203,11 @@ func (o *options) listCmd() *cobra.Command {
 				}
 				return nil
 			case "", "wide":
-				printBMCs(o.streams.Out, items, output == "wide", o.color)
+				var seen map[string]time.Time
+				if output == "wide" && c.LastSeen != nil {
+					seen, _ = c.LastSeen(cmd.Context()) // optional; requires list on leases
+				}
+				printBMCs(o.streams.Out, items, seen, output == "wide", o.color)
 				return nil
 			}
 			return fmt.Errorf("unsupported output format %q", output)

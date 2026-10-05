@@ -1,5 +1,10 @@
-// Package agent implements the node agent. It maintains the BMC object of its node and
-// serves the full snapshot, including all sensors and SEL entries, over HTTP.
+// Package agent implements the node agent. It maintains the BMC object of its node, renews
+// a heartbeat Lease and serves the full snapshot, including all sensors and SEL entries,
+// over HTTP.
+//
+// To keep the load on the API server and etcd low, liveness is reported through a small
+// Lease, as kubelet does for nodes, and the BMC status is written only when it changes
+// meaningfully (see writeReason).
 package agent
 
 import (
@@ -9,44 +14,51 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
-	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/collector"
 )
 
 type Options struct {
 	NodeName string
-	Listen   string
-	// StatusInterval is the maximum time between status writes. Changes to health, power
-	// state or inventory are written immediately; changes to readings only are deferred.
-	StatusInterval time.Duration
-	Version        string
+	// Namespace holds the heartbeat Lease.
+	Namespace string
+	Listen    string
+	// LeaseDuration is the validity of the heartbeat Lease; it is renewed every third of it.
+	LeaseDuration time.Duration
+	// StatusRefresh is the maximum age of the readings (power, inlet temperature, SEL
+	// counters) in the BMC status when they change only within their deadband.
+	StatusRefresh time.Duration
+	// MaxCollectionAge is how old the last collection round may be before /readyz fails.
+	MaxCollectionAge time.Duration
+	Version          string
 }
 
 type Agent struct {
-	k8s  client.Client
-	col  *collector.Collector
-	opts Options
-	log  *slog.Logger
-
-	lastWrite  time.Time
-	lastStatus bmcv1.BMCStatus
+	k8s    client.Client
+	col    *collector.Collector
+	opts   Options
+	log    *slog.Logger
+	status *statusWriter
+	lease  *heartbeat
 }
 
+var statusWrites = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "kube_bmc_status_writes_total",
+	Help: "BMC status writes to the API server by reason: initial, change, readings or refresh.",
+}, []string{"reason"})
+
 func New(k8s client.Client, col *collector.Collector, opts Options, log *slog.Logger) *Agent {
-	return &Agent{k8s: k8s, col: col, opts: opts, log: log}
+	return &Agent{
+		k8s: k8s, col: col, opts: opts, log: log,
+		status: &statusWriter{k8s: k8s, node: opts.NodeName, version: opts.Version, refresh: opts.StatusRefresh, log: log},
+		lease:  &heartbeat{k8s: k8s, namespace: opts.Namespace, node: opts.NodeName, duration: opts.LeaseDuration},
+	}
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -64,28 +76,58 @@ func (a *Agent) Run(ctx context.Context) error {
 	}()
 	go a.col.Run(ctx)
 
-	heartbeat := time.NewTicker(a.opts.StatusInterval)
-	defer heartbeat.Stop()
+	renew := time.NewTicker(a.opts.LeaseDuration / 3)
+	defer renew.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-a.col.Updates():
-		case <-heartbeat.C:
-		}
-		if err := a.sync(ctx); err != nil {
-			a.log.Error("status sync failed", "err", err)
+			if err := a.sync(ctx); err != nil {
+				a.log.Error("status sync failed", "err", err)
+			}
+		case <-renew.C:
+			if !a.col.Fresh(a.opts.MaxCollectionAge) {
+				continue // a stalled collector must not look alive
+			}
+			if err := a.lease.renew(ctx, a.node); err != nil {
+				a.log.Error("lease renewal failed", "err", err)
+			}
 		}
 	}
 }
 
+// sync writes the status and, on the first round, the heartbeat.
+func (a *Agent) sync(ctx context.Context) error {
+	if !a.col.Ready() {
+		return nil
+	}
+	snap := a.col.Snapshot()
+	if err := a.status.write(ctx, &snap, a.node); err != nil {
+		return err
+	}
+	if a.lease.lease == nil {
+		return a.lease.renew(ctx, a.node)
+	}
+	return nil
+}
+
+// node returns the Node object, which owns the BMC object and the Lease.
+func (a *Agent) node(ctx context.Context) (*corev1.Node, error) {
+	n := &corev1.Node{}
+	if err := a.k8s.Get(ctx, client.ObjectKey{Name: a.opts.NodeName}, n); err != nil {
+		return nil, fmt.Errorf("get node: %w", err)
+	}
+	return n, nil
+}
+
 func (a *Agent) handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("GET /metrics", promhttp.HandlerFor(collector.NewRegistry(a.col), promhttp.HandlerOpts{}))
+	mux.Handle("GET /metrics", promhttp.HandlerFor(collector.NewRegistry(a.col, statusWrites), promhttp.HandlerOpts{}))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		if !a.col.Ready() {
-			http.Error(w, "first collection round not finished", http.StatusServiceUnavailable)
+		if !a.col.Fresh(a.opts.MaxCollectionAge) {
+			http.Error(w, "no collection round completed recently", http.StatusServiceUnavailable)
 			return
 		}
 		_, _ = w.Write([]byte("ok"))
@@ -95,94 +137,4 @@ func (a *Agent) handler() http.Handler {
 		_ = json.NewEncoder(w).Encode(a.col.Snapshot())
 	})
 	return mux
-}
-
-// sync creates the BMC object if needed and writes its status.
-func (a *Agent) sync(ctx context.Context) error {
-	if !a.col.Ready() {
-		return nil
-	}
-	snap := a.col.Snapshot()
-	status := collector.Status(&snap)
-
-	significant := !equality.Semantic.DeepEqual(volatileFree(status), volatileFree(a.lastStatus))
-	if !significant && time.Since(a.lastWrite) < a.opts.StatusInterval {
-		return nil
-	}
-
-	bmc, err := a.ensure(ctx)
-	if err != nil {
-		return err
-	}
-	orig := bmc.DeepCopy()
-	conditions := bmc.Status.Conditions
-	bmc.Status = status
-	bmc.Status.Conditions = conditions
-	bmc.Status.AgentVersion = a.opts.Version
-	bmc.Status.LastUpdated = ptr.To(metav1.Now())
-	meta.SetStatusCondition(&bmc.Status.Conditions, readyCondition(snap.Errors, bmc.Generation))
-
-	if err := a.k8s.Status().Patch(ctx, bmc, client.MergeFrom(orig)); err != nil {
-		return fmt.Errorf("patch status: %w", err)
-	}
-	a.lastWrite, a.lastStatus = time.Now(), status
-	return nil
-}
-
-// volatileFree clears fields that change on every round, so that they alone do not trigger a write.
-func volatileFree(s bmcv1.BMCStatus) bmcv1.BMCStatus {
-	s.PowerWatts, s.InletTemperature = nil, nil
-	s.Problems = slices.Clone(s.Problems)
-	for i := range s.Problems {
-		s.Problems[i].Message = "" // messages contain live readings
-	}
-	return s
-}
-
-func readyCondition(errs map[string]string, gen int64) metav1.Condition {
-	c := metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "Collecting",
-		Message: "In-band IPMI collection is working", ObservedGeneration: gen}
-	if len(errs) == 0 {
-		return c
-	}
-	phases := make([]string, 0, len(errs))
-	for p, e := range errs {
-		phases = append(phases, p+": "+e)
-	}
-	slices.Sort(phases)
-	c.Message = strings.Join(phases, "; ")
-	c.Reason = "PartialCollection"
-	if _, ok := errs["sensors"]; ok {
-		c.Status, c.Reason = metav1.ConditionFalse, "CollectionFailed"
-	}
-	return c
-}
-
-func (a *Agent) ensure(ctx context.Context) (*bmcv1.BMC, error) {
-	bmc := &bmcv1.BMC{}
-	err := a.k8s.Get(ctx, client.ObjectKey{Name: a.opts.NodeName}, bmc)
-	if err == nil || !apierrors.IsNotFound(err) {
-		return bmc, err
-	}
-
-	node := &corev1.Node{}
-	if err := a.k8s.Get(ctx, client.ObjectKey{Name: a.opts.NodeName}, node); err != nil {
-		return nil, fmt.Errorf("get node: %w", err)
-	}
-	bmc = &bmcv1.BMC{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   a.opts.NodeName,
-			Labels: map[string]string{"app.kubernetes.io/managed-by": "kube-bmc"},
-			// The BMC object is garbage-collected together with its Node.
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: "v1", Kind: "Node", Name: node.Name, UID: node.UID,
-			}},
-		},
-		Spec: bmcv1.BMCSpec{NodeName: a.opts.NodeName, Protocol: bmcv1.ProtocolRedfish, InsecureSkipVerify: true},
-	}
-	if err := a.k8s.Create(ctx, bmc); err != nil {
-		return nil, fmt.Errorf("create bmc: %w", err)
-	}
-	a.log.Info("registered BMC")
-	return bmc, nil
 }
