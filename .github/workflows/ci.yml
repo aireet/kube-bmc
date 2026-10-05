@@ -62,6 +62,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
       - uses: docker/metadata-action@v5
         id: meta
         with:
@@ -76,6 +77,6 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=edge-${{ github.sha }}
+          build-args: VERSION=edge-${{ env.SHORT_SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
