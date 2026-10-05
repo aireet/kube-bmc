@@ -107,7 +107,7 @@ export interface Config {
   version: string
   powerActions: boolean
   clusterName?: string
-  login: boolean
+  auth: 'none' | 'password' | 'oidc'
 }
 
 export interface Me {
@@ -115,7 +115,7 @@ export interface Me {
   groups?: string[]
   email?: string
   name?: string
-  method: 'none' | 'session' | 'oidc-token' | 'kubernetes'
+  method: 'none' | 'session' | 'password' | 'oidc-token' | 'kubernetes'
 }
 
 export const powerActions = ['On', 'GracefulShutdown', 'GracefulRestart', 'ForceRestart', 'PowerCycle', 'ForceOff'] as const

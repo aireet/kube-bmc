@@ -27,9 +27,9 @@ The `diagnose_server` prompt guides an agent through a hardware investigation of
 
 ## Authentication
 
-With `auth.mode=none` the endpoint is open. With `auth.mode=oidc` every request needs a bearer
-token: an OIDC ID token from the configured issuer, or the token of a ServiceAccount in the
-kube-bmc namespace (see [authentication.md](authentication.md)). Unauthenticated requests receive `401` with a
+With `auth.mode=none` the endpoint is open. With `password` or `oidc` every request needs a bearer
+token: the token of a ServiceAccount in the kube-bmc namespace, or in `oidc` mode an ID token from
+the configured issuer (see [authentication.md](authentication.md)). Unauthenticated requests receive `401` with a
 `WWW-Authenticate` header that points to the OAuth protected resource metadata at
 `/.well-known/oauth-protected-resource` (RFC 9728).
 

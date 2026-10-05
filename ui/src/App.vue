@@ -60,7 +60,7 @@ const ready = ref(false)
 onMounted(async () => {
   try {
     config.value = await api.config()
-    if (!signedOut) me.value = await api.me()
+    if (!signedOut && location.pathname !== '/login') me.value = await api.me()
   } catch {
     /* pages report API errors */
   } finally {

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -31,9 +33,12 @@ var ErrUnauthenticated = errors.New("authentication required")
 type Options struct {
 	// OIDC enables browser sign-in and OIDC bearer tokens. Nil disables both.
 	OIDC *OIDC
+	// Passwords enables browser sign-in with a username and password. It is not used
+	// together with OIDC.
+	Passwords *Passwords
 	// Tokens enables Kubernetes bearer tokens. Nil disables them.
 	Tokens *TokenReviewer
-	// SessionSecret encrypts session cookies. Required when OIDC is set.
+	// SessionSecret encrypts session cookies. Required when OIDC or Passwords is set.
 	SessionSecret []byte
 	SessionTTL    time.Duration
 	// SecureCookies sets the Secure attribute; enable it when served over HTTPS.
@@ -57,7 +62,7 @@ func New(opts Options) (*Authenticator, error) {
 	if opts.SessionTTL <= 0 {
 		a.opts.SessionTTL = 12 * time.Hour
 	}
-	if opts.OIDC != nil {
+	if opts.OIDC != nil || opts.Passwords != nil {
 		codec, err := newCookieCodec(opts.SessionSecret)
 		if err != nil {
 			return nil, err
@@ -68,10 +73,20 @@ func New(opts Options) (*Authenticator, error) {
 }
 
 // Enabled reports whether requests must authenticate.
-func (a *Authenticator) Enabled() bool { return a.opts.OIDC != nil || a.opts.Tokens != nil }
+func (a *Authenticator) Enabled() bool {
+	return a.opts.OIDC != nil || a.opts.Passwords != nil || a.opts.Tokens != nil
+}
 
-// LoginEnabled reports whether browser sign-in is available.
-func (a *Authenticator) LoginEnabled() bool { return a.opts.OIDC != nil }
+// Mode returns the browser sign-in mode: "oidc", "password" or "none".
+func (a *Authenticator) Mode() string {
+	switch {
+	case a.opts.OIDC != nil:
+		return "oidc"
+	case a.opts.Passwords != nil:
+		return "password"
+	}
+	return "none"
+}
 
 // Identify returns the identity of r from its bearer token or session cookie.
 func (a *Authenticator) Identify(r *http.Request) (Identity, error) {
@@ -86,7 +101,7 @@ func (a *Authenticator) Identify(r *http.Request) (Identity, error) {
 		id, _, err := a.VerifyBearer(r.Context(), token)
 		return id, err
 	}
-	if a.opts.OIDC != nil {
+	if a.opts.OIDC != nil || a.opts.Passwords != nil {
 		if c, err := r.Cookie(sessionCookie); err == nil {
 			var id Identity
 			if err := a.codec.decode(sessionCookie, c.Value, &id); err == nil {
@@ -152,8 +167,13 @@ type loginState struct {
 	Redirect string `json:"r"`
 }
 
-// Login starts the authorization code flow with PKCE.
+// Login signs a user in. With OIDC it starts the authorization code flow with PKCE;
+// with passwords, GET redirects to the sign-in page and POST checks the credentials.
 func (a *Authenticator) Login(w http.ResponseWriter, r *http.Request) {
+	if a.opts.Passwords != nil {
+		a.passwordLogin(w, r)
+		return
+	}
 	o := a.opts.OIDC
 	if o == nil {
 		http.NotFound(w, r)
@@ -221,6 +241,59 @@ func (a *Authenticator) Callback(w http.ResponseWriter, r *http.Request) {
 	a.setCookie(w, sessionCookie, value, a.opts.SessionTTL)
 	a.opts.Log.Info("user signed in", "user", id.Username, "groups", id.Groups)
 	http.Redirect(w, r, st.Redirect, http.StatusFound)
+}
+
+type passwordLoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func (a *Authenticator) passwordLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		http.Redirect(w, r, "/login?rd="+url.QueryEscape(safeRedirect(r.URL.Query().Get("rd"))), http.StatusFound)
+		return
+	}
+	// A JSON body cannot be sent cross-site without a CORS preflight.
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		writeAuthError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+		return
+	}
+	var req passwordLoginRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	id, err := a.opts.Passwords.Verify(r.Context(), req.Username, req.Password, host)
+	switch {
+	case errors.Is(err, ErrTooManyAttempts):
+		a.opts.Log.Warn("sign-in rejected", "user", req.Username, "client", host, "reason", "locked out")
+		writeAuthError(w, http.StatusTooManyRequests, err.Error())
+		return
+	case errors.Is(err, ErrUnauthenticated):
+		a.opts.Log.Warn("sign-in failed", "user", req.Username, "client", host)
+		writeAuthError(w, http.StatusUnauthorized, "invalid username or password")
+		return
+	case err != nil:
+		a.opts.Log.Error("sign-in failed", "err", err)
+		writeAuthError(w, http.StatusInternalServerError, "sign-in is unavailable")
+		return
+	}
+	value, err := a.codec.encode(sessionCookie, id, a.opts.SessionTTL)
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	a.setCookie(w, sessionCookie, value, a.opts.SessionTTL)
+	a.opts.Log.Info("user signed in", "user", id.Username, "method", id.Method)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(id)
+}
+
+func writeAuthError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 // Logout clears the session.

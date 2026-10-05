@@ -24,3 +24,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "kube-bmc.credentialsSecret" -}}
 {{- if .Values.server.credentials.existingSecret -}}{{ .Values.server.credentials.existingSecret }}{{- else if .Values.server.credentials.create -}}{{ include "kube-bmc.fullname" . }}-credentials{{- end -}}
 {{- end -}}
+
+{{- define "kube-bmc.authSecret" -}}
+{{- .Values.auth.existingSecret | default (printf "%s-auth" (include "kube-bmc.fullname" .)) -}}
+{{- end -}}

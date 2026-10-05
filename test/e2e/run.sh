@@ -2,8 +2,9 @@
 # End-to-end test in a kind cluster.
 #
 # kind nodes have no BMC, so agents report collection errors; the test covers everything
-# that does not need hardware: installation, agent registration and heartbeat, the
-# server API, MCP, the kubectl plugin and the BMCAction execution policy.
+# that does not need hardware: installation, agent registration and heartbeat,
+# password sign-in, ServiceAccount tokens, the server API, MCP, the kubectl plugin and
+# the BMCAction execution policy.
 #
 # Usage: test/e2e/run.sh            (creates and deletes the cluster "kube-bmc-e2e")
 #        KEEP_CLUSTER=1 test/e2e/run.sh
@@ -46,10 +47,13 @@ kind load docker-image "$IMAGE" --name "$CLUSTER"
 (cd "$ROOT" && CGO_ENABLED=0 go build -o "$WORK/kubectl-bmc" ./cmd/kubectl-bmc)
 export PATH="$WORK:$PATH"
 
-log "Installing the chart"
+log "Installing the chart with password authentication"
+USERS=$(printf 'e2e-password' | docker run --rm -i --entrypoint kube-bmc "$IMAGE" hash-password admin)
 helm install kube-bmc "$ROOT/charts/kube-bmc" --namespace "$NS" --create-namespace --wait --timeout 3m \
   --set image.repository=kube-bmc --set image.tag=e2e --set image.pullPolicy=Never \
-  --set agent.interval=10s --set agent.leaseDuration=30s
+  --set agent.interval=10s --set agent.leaseDuration=30s \
+  --set auth.mode=password --set auth.sessionSecret="$(head -c 48 /dev/urandom | base64)" \
+  --set-string "auth.password.users[0]=$USERS"
 
 log "Agent registers the BMC object and renews its Lease"
 eventually 120 kubectl get bmc "$NODE" >/dev/null 2>&1 || fail "BMC $NODE was not created"
@@ -58,19 +62,34 @@ eventually 60 kubectl -n "$NS" get lease "$NODE" >/dev/null 2>&1 || fail "heartb
 reason=$(kubectl get bmc "$NODE" -o jsonpath='{.status.conditions[?(@.type=="Ready")].reason}')
 [ "$reason" = CollectionFailed ] || fail "expected Ready reason CollectionFailed without a BMC, got '$reason'"
 
-log "Server API and MCP endpoint"
+log "Password sign-in"
 kubectl -n "$NS" port-forward svc/kube-bmc 18080:80 >/dev/null 2>&1 &
 PF_PID=$!
-eventually 30 curl -fsS http://127.0.0.1:18080/healthz >/dev/null || fail "server is not reachable"
-curl -fsS http://127.0.0.1:18080/api/v1/bmcs | grep -q "\"name\":\"$NODE\"" || fail "API does not list $NODE"
-curl -fsS http://127.0.0.1:18080/api/v1/bmcs | grep -q '"stale":false' || fail "agent heartbeat not recognized"
-mcp() {
-  curl -fsS http://127.0.0.1:18080/mcp -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' -H 'MCP-Protocol-Version: 2025-06-18' -d "$1"
+API=http://127.0.0.1:18080
+eventually 30 curl -fsS $API/healthz >/dev/null || fail "server is not reachable"
+[ "$(curl -s -o /dev/null -w '%{http_code}' $API/api/v1/bmcs)" = 401 ] || fail "API is reachable without authentication"
+login() {
+  curl -s -o /dev/null -w '%{http_code}' -c "$WORK/cookies" $API/auth/login \
+    -H 'Content-Type: application/json' -d "{\"username\":\"admin\",\"password\":\"$1\"}"
 }
-mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -q '"power_action"' || fail "MCP tools/list"
-mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fleet_summary","arguments":{}}}' \
+[ "$(login wrong-password)" = 401 ] || fail "wrong password accepted"
+[ "$(login e2e-password)" = 200 ] || fail "sign-in failed"
+curl -fsS -b "$WORK/cookies" $API/api/v1/bmcs | grep -q "\"name\":\"$NODE\"" || fail "API does not list $NODE"
+curl -fsS -b "$WORK/cookies" $API/api/v1/bmcs | grep -q '"stale":false' || fail "agent heartbeat not recognized"
+curl -fsS -b "$WORK/cookies" $API/api/v1/me | grep -q '"username":"admin"' || fail "session identity"
+
+log "MCP with a ServiceAccount token"
+kubectl -n "$NS" create serviceaccount e2e-agent >/dev/null
+TOKEN=$(kubectl -n "$NS" create token e2e-agent)
+OTHER=$(kubectl -n default create token default)
+mcp() {
+  curl -fsS $API/mcp -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' -H 'MCP-Protocol-Version: 2025-06-18' -d "$2"
+}
+mcp "$TOKEN" '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -q '"power_action"' || fail "MCP tools/list"
+mcp "$TOKEN" '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fleet_summary","arguments":{}}}' \
   | grep -q '"servers":1' || fail "MCP fleet_summary"
+mcp "$OTHER" '{"jsonrpc":"2.0","id":3,"method":"tools/list"}' >/dev/null 2>&1 && fail "token from another namespace accepted"
 
 log "kubectl plugin"
 kubectl bmc list | grep -q "$NODE" || fail "kubectl bmc list"

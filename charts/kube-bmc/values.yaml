@@ -76,32 +76,37 @@ server:
   podAnnotations: {}
 
 auth:
-  # none: no authentication.
-  # oidc: browser sign-in with OpenID Connect; API and MCP clients send OIDC or Kubernetes
-  #       bearer tokens. Every authenticated user has full access, so restrict who can
-  #       sign in at the identity provider.
+  # none:     no authentication. Use only behind kubectl port-forward or another
+  #           authenticating proxy.
+  # password: sign-in with usernames and passwords from an htpasswd list.
+  # oidc:     sign-in with an OpenID Connect provider.
+  # Every authenticated user has full access. See docs/authentication.md.
   mode: none
-  # Also accept tokens of ServiceAccounts in the release namespace, for automation such as
-  # MCP clients: `kubectl -n <namespace> create token <serviceaccount>`.
+  # Also accept tokens of ServiceAccounts in the release namespace (API and MCP clients).
   kubernetesTokens: true
   sessionTTL: 12h
+  # Existing Secret with the keys:
+  #   session-secret  random string of at least 32 bytes (password and oidc)
+  #   htpasswd        user list (password)
+  #   client-secret   OIDC client secret (oidc)
+  existingSecret: ""
+  # Used to create the Secret when existingSecret is empty.
+  sessionSecret: ""
+  password:
+    # htpasswd lines, created with `kube-bmc hash-password USERNAME`.
+    users: []
   oidc:
     issuerURL: ""
     clientID: kube-bmc
-    scopes: openid,profile,email,groups
+    clientSecret: ""
+    scopes: openid,profile,email
     usernameClaim: email
     groupsClaim: groups
-    # Prefixes applied before RBAC checks, like the API server's --oidc-*-prefix flags.
+    # Prefixes applied to OIDC usernames and groups, like the API server's --oidc-*-prefix flags.
     usernamePrefix: "oidc:"
     groupsPrefix: "oidc:"
     # Additional token audiences accepted from API and MCP clients.
     extraAudiences: []
-    # Existing Secret with the keys client-secret and session-secret (at least 32 bytes).
-    existingSecret: ""
-    # Used only when existingSecret is empty.
-    clientSecret: ""
-    sessionSecret: ""
-
 
 metrics:
   # Create a PodMonitor for the agents (requires the Prometheus Operator CRDs).

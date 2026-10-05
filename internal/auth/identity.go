@@ -1,8 +1,9 @@
 // Package auth authenticates dashboard, API and MCP requests.
 //
-// Identities come from an OIDC browser session, an OIDC bearer token, or a Kubernetes
-// bearer token (TokenReview). Every authenticated identity has full access; the identity
-// is recorded as the requester of power actions.
+// Browser sessions are established with OpenID Connect or with a username and password
+// checked against an htpasswd Secret. API and MCP clients send OIDC ID tokens or tokens of
+// ServiceAccounts in the kube-bmc namespace. Every authenticated identity has full access;
+// the identity is recorded as the requester of power actions.
 package auth
 
 import "context"
@@ -13,6 +14,7 @@ type Method string
 const (
 	MethodNone       Method = "none" // authentication is disabled
 	MethodSession    Method = "session"
+	MethodPassword   Method = "password"
 	MethodOIDCToken  Method = "oidc-token"
 	MethodKubernetes Method = "kubernetes"
 )

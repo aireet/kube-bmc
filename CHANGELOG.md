@@ -14,8 +14,10 @@ All notable changes to this project are documented in this file. The format foll
   with a TTL for finished actions and Node events. Disabled by default.
 - Dashboard (Vue 3, Naive UI): fleet overview, server details, sensors, event log, action history,
   English and Chinese, light and dark themes.
-- Authentication with OpenID Connect (authorization code flow with PKCE) and bearer tokens
-  (OIDC ID tokens and tokens of ServiceAccounts in the kube-bmc namespace).
+- Authentication modes `none`, `password` (bcrypt htpasswd list in a Secret, with brute-force
+  lockout and a `kube-bmc hash-password` helper) and `oidc` (authorization code flow with PKCE);
+  bearer tokens for API and MCP clients (OIDC ID tokens and tokens of ServiceAccounts in the
+  kube-bmc namespace).
 - MCP endpoint (`/mcp`, Streamable HTTP) with read tools, a power action tool and a diagnosis prompt.
 - `kubectl bmc` plugin: list, describe, sensors, events, power and actions.
 - Helm chart and plain install manifest.

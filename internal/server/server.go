@@ -83,8 +83,8 @@ type Config struct {
 	Version      string `json:"version"`
 	PowerActions bool   `json:"powerActions"`
 	ClusterName  string `json:"clusterName,omitempty"`
-	// Login is true when browser sign-in through OIDC is available.
-	Login bool `json:"login"`
+	// Auth is the browser sign-in mode: "none", "password" or "oidc".
+	Auth string `json:"auth"`
 }
 
 // Authenticator establishes request identities and implements browser sign-in.
@@ -128,6 +128,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/config", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, s.Config) })
 	mux.Handle("/api/", s.Authn.Middleware(api))
 	mux.HandleFunc("GET /auth/login", s.Authn.Login)
+	mux.HandleFunc("POST /auth/login", s.Authn.Login)
 	mux.HandleFunc("GET /auth/callback", s.Authn.Callback)
 	mux.HandleFunc("GET /auth/logout", s.Authn.Logout)
 	if s.MCP != nil {

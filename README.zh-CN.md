@@ -34,7 +34,7 @@ server131   server131   10.20.0.31      Gooxi    SY8108G-G4   On      1240    43
 - **资产与健康**：支持任意 IPMI 2.0 BMC，采集 FRU、固件、管理网络、带阈值的传感器、机箱故障、DCMI 功耗和系统事件日志（SEL），汇总为 `OK` / `Warning` / `Critical` 健康状态，并给出问题列表。
 - **电源控制**（`On`、`GracefulShutdown`、`GracefulRestart`、`ForceRestart`、`PowerCycle`、`ForceOff`）：通过 Redfish 或 IPMI-over-LAN 执行。每次请求都是一个 `BMCAction` 对象，同时作为审计记录。默认关闭。
 - **三种入口**：Web 控制台、`kubectl bmc` 插件和 MCP 接口。所有电源操作都会记录发起人身份。
-- **认证**：控制台使用 OpenID Connect 登录；API 和 MCP 客户端可使用 OIDC token，或 kube-bmc 所在 namespace 中 ServiceAccount 的 token。
+- **认证**：控制台支持 OpenID Connect 登录或内置用户名密码登录；API 和 MCP 客户端可使用 OIDC token，或 kube-bmc 所在 namespace 中 ServiceAccount 的 token。
 - **Prometheus 指标**：覆盖每个传感器，以及功耗、健康状态和 SEL 使用率。
 
 ## 安装
@@ -49,7 +49,22 @@ kubectl get bmc
 kubectl -n kube-bmc-system port-forward svc/kube-bmc 8080:80
 ```
 
-默认安装不启用认证。如果要在 port-forward 之外暴露控制台，请先配置[认证](docs/authentication.md)。
+默认安装不启用认证。如果要在 port-forward 之外暴露控制台，请先配置认证：
+
+| `auth.mode` | 登录方式 |
+|---|---|
+| `none` | 不认证（默认，适合只通过 `kubectl port-forward` 访问） |
+| `password` | 用户名密码，用户以 bcrypt 哈希存放在 Secret 中，增删用户无需重启 |
+| `oidc` | 任意 OpenID Connect 身份提供方：Keycloak、Dex、Entra ID、Okta、Google 等 |
+
+```yaml
+# 用户名密码模式。生成用户：printf '%s' '密码' | kube-bmc hash-password 用户名
+auth:
+  mode: password
+  existingSecret: kube-bmc-auth   # 键：session-secret、htpasswd
+```
+
+两种模式的详细步骤、各家 IdP 的接入方法和排错见 [docs/authentication.md](docs/authentication.md)。
 
 ## 架构
 

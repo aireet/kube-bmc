@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -65,6 +66,8 @@ func run() error {
 		return runAgent(ctx, os.Args[2:])
 	case "server":
 		return runServer(ctx, os.Args[2:])
+	case "hash-password":
+		return hashPassword(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	default:
@@ -74,8 +77,32 @@ func run() error {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: kube-bmc <agent|server|version> [flags]\n\nRun 'kube-bmc <command> -h' for flags.\n")
+	fmt.Fprintf(os.Stderr, "usage: kube-bmc <agent|server|hash-password|version> [flags]\n\nRun 'kube-bmc <command> -h' for flags.\n")
 	os.Exit(2)
+}
+
+// hashPassword prints an htpasswd line for --auth=password. The password is read from
+// standard input so that it does not appear in the shell history or process list.
+func hashPassword(args []string) error {
+	fs := flag.NewFlagSet("hash-password", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "usage: echo -n PASSWORD | kube-bmc hash-password USERNAME\n")
+	}
+	_ = fs.Parse(args)
+	if fs.NArg() != 1 {
+		fs.Usage()
+		os.Exit(2)
+	}
+	pw, err := io.ReadAll(io.LimitReader(os.Stdin, 1024))
+	if err != nil {
+		return err
+	}
+	line, err := auth.HashPassword(fs.Arg(0), strings.TrimRight(string(pw), "\r\n"))
+	if err != nil {
+		return err
+	}
+	fmt.Println(line)
+	return nil
 }
 
 func logger(level string) *slog.Logger {
@@ -192,8 +219,9 @@ func runServer(ctx context.Context, args []string) error {
 	staleAfter := fs.Duration("stale-after", 15*time.Minute, "mark a BMC stale when its agent has neither a heartbeat Lease nor reported for this long")
 	clusterName := fs.String("cluster-name", "", "cluster name shown in the dashboard")
 	externalURL := fs.String("external-url", "", "public base URL of the dashboard, e.g. https://kube-bmc.example.com")
-	authMode := fs.String("auth", "none", "authentication mode: none or oidc")
-	kubeTokens := fs.Bool("kubernetes-tokens", true, "with --auth=oidc, also accept tokens of ServiceAccounts in --namespace")
+	authMode := fs.String("auth", "none", "authentication mode: none, password or oidc")
+	kubeTokens := fs.Bool("kubernetes-tokens", true, "with --auth=password or oidc, also accept tokens of ServiceAccounts in --namespace")
+	usersSecret := fs.String("users-secret", "kube-bmc-users", "with --auth=password, Secret in --namespace whose htpasswd key lists the users")
 	issuer := fs.String("oidc-issuer-url", "", "OIDC issuer URL")
 	clientID := fs.String("oidc-client-id", "", "OIDC client ID")
 	clientSecret := fs.String("oidc-client-secret", "", "OIDC client secret (defaults to $OIDC_CLIENT_SECRET)")
@@ -248,6 +276,16 @@ func runServer(ctx context.Context, args []string) error {
 	switch *authMode {
 	case "none":
 		log.Warn("authentication is disabled; anyone who can reach the server has full access")
+	case "password":
+		secret := []byte(envOr("SESSION_SECRET", *sessionSecret))
+		if len(secret) < 32 {
+			return errors.New("--session-secret or $SESSION_SECRET of at least 32 bytes is required with --auth=password")
+		}
+		authOpts.SessionSecret = secret
+		authOpts.Passwords = &auth.Passwords{Reader: mgr.GetClient(), Namespace: *namespace, Secret: *usersSecret}
+		if *kubeTokens {
+			authOpts.Tokens = &auth.TokenReviewer{Client: mgr.GetClient(), Namespace: *namespace, TTL: time.Minute}
+		}
 	case "oidc":
 		if base == "" {
 			return errors.New("--external-url is required with --auth=oidc")
@@ -299,7 +337,7 @@ func runServer(ctx context.Context, args []string) error {
 		Addr: *listen,
 		Handler: server.New(server.Options{
 			Backend: backend,
-			Config:  server.Config{Version: version, PowerActions: *powerActions, ClusterName: *clusterName, Login: authn.LoginEnabled()},
+			Config:  server.Config{Version: version, PowerActions: *powerActions, ClusterName: *clusterName, Auth: authn.Mode()},
 			UI:      web.FS(), Authn: authn, MCP: mcpHandler, ProtectedResourceMetadata: prm, Log: log,
 		}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,

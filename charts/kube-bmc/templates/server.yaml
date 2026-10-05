@@ -75,18 +75,23 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kube-bmc.fullname" . }}-server
     namespace: {{ .Release.Namespace }}
-{{- if and (eq .Values.auth.mode "oidc") (not .Values.auth.oidc.existingSecret) }}
+{{- if and (ne .Values.auth.mode "none") (not .Values.auth.existingSecret) }}
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ include "kube-bmc.fullname" . }}-oidc
+  name: {{ include "kube-bmc.authSecret" . }}
   namespace: {{ .Release.Namespace }}
   labels: {{- include "kube-bmc.labels" . | nindent 4 }}
 type: Opaque
 stringData:
+  session-secret: {{ required "auth.sessionSecret (at least 32 characters) or auth.existingSecret is required" .Values.auth.sessionSecret | quote }}
+  {{- if eq .Values.auth.mode "password" }}
+  htpasswd: {{ required "auth.password.users or auth.existingSecret is required" (join "\n" .Values.auth.password.users) | quote }}
+  {{- end }}
+  {{- if eq .Values.auth.mode "oidc" }}
   client-secret: {{ .Values.auth.oidc.clientSecret | quote }}
-  session-secret: {{ required "auth.oidc.sessionSecret (at least 32 characters) or auth.oidc.existingSecret is required" .Values.auth.oidc.sessionSecret | quote }}
+  {{- end }}
 {{- end }}
 {{- if and .Values.server.credentials.create (not .Values.server.credentials.existingSecret) }}
 ---
@@ -157,9 +162,14 @@ spec:
             - {{ printf "--external-url=%v" (.) | quote }}
             {{- end }}
             - {{ printf "--auth=%v" (.Values.auth.mode) | quote }}
-            {{- if eq .Values.auth.mode "oidc" }}
+            {{- if ne .Values.auth.mode "none" }}
             - {{ printf "--kubernetes-tokens=%v" (.Values.auth.kubernetesTokens) | quote }}
             - {{ printf "--session-ttl=%v" (.Values.auth.sessionTTL) | quote }}
+            {{- end }}
+            {{- if eq .Values.auth.mode "password" }}
+            - {{ printf "--users-secret=%v" (include "kube-bmc.authSecret" .) | quote }}
+            {{- end }}
+            {{- if eq .Values.auth.mode "oidc" }}
             - {{ printf "--oidc-issuer-url=%v" (required "auth.oidc.issuerURL is required" .Values.auth.oidc.issuerURL) | quote }}
             - {{ printf "--oidc-client-id=%v" (.Values.auth.oidc.clientID) | quote }}
             - {{ printf "--oidc-scopes=%v" (.Values.auth.oidc.scopes) | quote }}
@@ -174,11 +184,13 @@ spec:
           env:
             - name: POD_NAMESPACE
               valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            {{- if ne .Values.auth.mode "none" }}
+            - name: SESSION_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "kube-bmc.authSecret" . }}, key: session-secret } }
+            {{- end }}
             {{- if eq .Values.auth.mode "oidc" }}
             - name: OIDC_CLIENT_SECRET
-              valueFrom: { secretKeyRef: { name: {{ .Values.auth.oidc.existingSecret | default (printf "%s-oidc" (include "kube-bmc.fullname" .)) }}, key: client-secret } }
-            - name: SESSION_SECRET
-              valueFrom: { secretKeyRef: { name: {{ .Values.auth.oidc.existingSecret | default (printf "%s-oidc" (include "kube-bmc.fullname" .)) }}, key: session-secret } }
+              valueFrom: { secretKeyRef: { name: {{ include "kube-bmc.authSecret" . }}, key: client-secret } }
             {{- end }}
           ports:
             - name: http

@@ -55,8 +55,8 @@ Features:
   as the audit record. Disabled by default.
 - **Three interfaces**: the web dashboard, the `kubectl bmc` plugin and an MCP endpoint for AI
   agents. Power actions from all of them are recorded with the requester's identity.
-- **Authentication** with OpenID Connect for the dashboard, and OIDC or ServiceAccount bearer
-  tokens for API and MCP clients.
+- **Authentication** with OpenID Connect or built-in username and password for the dashboard, and
+  OIDC or ServiceAccount bearer tokens for API and MCP clients.
 - **Prometheus metrics** for every sensor, power draw, health and SEL usage.
 
 ## Installation
@@ -172,8 +172,35 @@ instead of Redfish, edit the `BMC` spec (see [examples/bmc-override.yaml](exampl
 ## Authentication
 
 kube-bmc is intended for the team that operates the cluster: it authenticates callers and records
-who requested each action, and every authenticated user has full access. Restrict who can sign in
-at the identity provider. See [docs/authentication.md](docs/authentication.md).
+who requested each action, and every authenticated user has full access.
+
+| `auth.mode` | Sign-in |
+|---|---|
+| `none` | No authentication (default; for `kubectl port-forward` access) |
+| `password` | Usernames and bcrypt password hashes in a Secret |
+| `oidc` | Any OpenID Connect provider: Keycloak, Dex, Microsoft Entra ID, Okta, Google |
+
+```yaml
+# Password mode
+auth:
+  mode: password
+  existingSecret: kube-bmc-auth   # keys: session-secret, htpasswd
+```
+
+```yaml
+# OIDC mode
+server:
+  externalURL: https://kube-bmc.example.com
+auth:
+  mode: oidc
+  existingSecret: kube-bmc-auth   # keys: session-secret, client-secret
+  oidc:
+    issuerURL: https://login.example.com
+    clientID: kube-bmc
+```
+
+[docs/authentication.md](docs/authentication.md) describes both modes step by step, with guides
+for common identity providers and troubleshooting.
 
 ## MCP endpoint
 
@@ -232,7 +259,8 @@ Example alerting rules: [examples/prometheus-rules.yaml](examples/prometheus-rul
 - The server runs as non-root with a read-only root filesystem and no capabilities. It reads
   Secrets only in its own namespace.
 - Without authentication (`auth.mode=none`) everyone who can reach the server has full access,
-  including power actions when they are enabled. Use `auth.mode=oidc` for any exposed deployment.
+  including power actions when they are enabled. Use `password` or `oidc` for any exposed
+  deployment.
 - IPMI-over-LAN has known weaknesses. Keep BMC networks isolated and prefer Redfish.
 
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
@@ -249,7 +277,8 @@ All chart values are documented in [charts/kube-bmc/values.yaml](charts/kube-bmc
 | `server.powerActions.enabled` | `false` | Execute power actions |
 | `server.credentials.existingSecret` | `""` | Default BMC credentials (`username`, `password`) |
 | `server.service.type` | `ClusterIP` | Service type of the dashboard |
-| `auth.mode` | `none` | `none` or `oidc` |
+| `auth.mode` | `none` | `none`, `password` or `oidc` |
+| `auth.existingSecret` | `""` | Secret with `session-secret`, `htpasswd` (password) or `client-secret` (oidc) |
 | `auth.oidc.issuerURL` | `""` | OIDC issuer |
 | `metrics.podMonitor.enabled` | `false` | Create a PodMonitor for the agents |
 
@@ -274,7 +303,7 @@ make dev        # dashboard with hot reload against a port-forwarded server on :
 | `internal/agent` | BMC object lifecycle and agent HTTP API |
 | `internal/controller` | `BMCAction` execution |
 | `internal/oob` | Redfish and IPMI-over-LAN power control |
-| `internal/auth` | OIDC sign-in and bearer token authentication |
+| `internal/auth` | Password and OIDC sign-in, bearer token authentication |
 | `internal/server` | Dashboard API |
 | `internal/mcpserver` | MCP tools and prompts |
 | `internal/kubectl` | kubectl plugin commands |
