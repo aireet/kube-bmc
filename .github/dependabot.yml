@@ -8,6 +8,12 @@ updates:
   - package-ecosystem: npm
     directory: /ui
     schedule: { interval: weekly }
+    groups:
+      ui: { patterns: ["*"], update-types: [minor, patch] }
+    ignore:
+      # vue-tsc needs the TypeScript 5.x JS API; TypeScript 7 (native) is not supported yet.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: monthly }
