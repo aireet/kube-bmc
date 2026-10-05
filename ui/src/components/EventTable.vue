@@ -17,15 +17,15 @@ const severe = /fail|fault|lost|critical|non-recoverable|uncorrectable|error|tri
 
 const columns = computed<DataTableColumns<SELEvent>>(() => [
   { title: '#', key: 'id', width: 70, render: (e) => h('span', { class: 'mono muted' }, e.id) },
-  { title: 'Time', key: 'timestamp', width: 170, render: (e) => h('span', { class: 'mono' }, e.timestamp) },
+  { title: t('time'), key: 'timestamp', width: 210, render: (e) => h('span', { class: 'mono', style: 'white-space:nowrap' }, e.timestamp) },
   {
     title: '', key: 'asserted', width: 96,
     render: (e) => h(NTag, { size: 'small', round: true, bordered: false, type: e.asserted ? (severe.test(e.event) ? 'error' : 'warning') : 'default' },
       () => (e.asserted ? t('asserted') : t('deasserted'))),
   },
-  { title: 'Sensor', key: 'sensor', minWidth: 200, ellipsis: { tooltip: true } },
-  { title: 'Event', key: 'event', minWidth: 240, ellipsis: { tooltip: true } },
-  { title: 'Detail', key: 'detail', minWidth: 240, ellipsis: { tooltip: true }, render: (e) => e.detail || '' },
+  { title: t('sensor'), key: 'sensor', minWidth: 200, ellipsis: { tooltip: true } },
+  { title: t('event'), key: 'event', minWidth: 240, ellipsis: { tooltip: true } },
+  { title: t('detail'), key: 'detail', minWidth: 240, ellipsis: { tooltip: true }, render: (e) => e.detail || '' },
 ])
 </script>
 

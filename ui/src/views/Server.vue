@@ -49,7 +49,7 @@ const selColor = computed(() => {
 <template>
   <main class="page">
     <n-breadcrumb class="crumbs">
-      <n-breadcrumb-item><router-link to="/">{{ t('back') }}</router-link></n-breadcrumb-item>
+      <n-breadcrumb-item><router-link to="/">{{ t('servers') }}</router-link></n-breadcrumb-item>
       <n-breadcrumb-item>{{ name }}</n-breadcrumb-item>
     </n-breadcrumb>
 
