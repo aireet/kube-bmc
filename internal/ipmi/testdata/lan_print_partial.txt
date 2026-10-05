@@ -1,0 +1,14 @@
+Set in Progress         : Set Complete
+Auth Type Support       : NONE MD2 MD5 PASSWORD 
+Auth Type Enable        : Callback : MD2 MD5 PASSWORD 
+                        : User     : MD2 MD5 PASSWORD 
+                        : Operator : MD2 MD5 PASSWORD 
+                        : Admin    : MD2 MD5 PASSWORD 
+                        : OEM      : MD2 MD5 PASSWORD 
+IP Address Source       : Static Address
+IP Address              : 10.30.4.27
+Subnet Mask             : 255.255.252.0
+MAC Address             : aa:bb:cc:00:22:33
+SNMP Community String   : public
+IP Header               : TTL=0x00 Flags=0x00 Precedence=0x00 TOS=0x00
+BMC ARP Control         : ARP Responses Enabled, Gratuitous ARP Disabled

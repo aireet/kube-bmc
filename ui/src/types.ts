@@ -28,8 +28,8 @@ export interface BMCStatus {
   controller?: { firmwareVersion?: string; ipmiVersion?: string; manufacturerID?: string; productID?: string; guid?: string }
   network?: { channel?: number; ipAddress?: string; netmask?: string; gateway?: string; macAddress?: string; source?: string; vlan?: string }
   chassis?: { powerRestorePolicy?: string; lastPowerEvent?: string; intrusionActive?: boolean; faults?: string[] }
-  sel?: { entries: number; usedPercent: number; lastAddTime?: string }
-  sensors?: { total: number; ok: number; warning: number; critical: number; noReading: number }
+  sel?: { entries?: number; usedPercent?: number; lastAddTime?: string }
+  sensors?: { total?: number; ok?: number; warning?: number; critical?: number; noReading?: number }
   problems?: Problem[]
   agentVersion?: string
   lastUpdated?: string

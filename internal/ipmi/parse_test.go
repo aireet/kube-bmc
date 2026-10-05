@@ -1,6 +1,8 @@
 package ipmi
 
 import (
+	"context"
+	"errors"
 	"os"
 	"slices"
 	"testing"
@@ -37,6 +39,25 @@ func TestParseLAN(t *testing.T) {
 	if got != want {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
+}
+
+// Supermicro prints the LAN configuration and then fails on an unsupported parameter.
+func TestLANUsesPartialOutput(t *testing.T) {
+	c := NewClient(partialRunner{}, "")
+	lan, err := c.LAN(t.Context())
+	if err != nil || lan.IPAddress != "10.30.4.27" || lan.Channel != 1 || lan.MACAddress != "aa:bb:cc:00:22:33" {
+		t.Fatalf("lan = %+v, err = %v", lan, err)
+	}
+}
+
+type partialRunner struct{}
+
+func (partialRunner) Run(_ context.Context, args ...string) ([]byte, error) {
+	if args[2] != "1" {
+		return nil, errors.New("Invalid channel: " + args[2])
+	}
+	b, _ := os.ReadFile("testdata/lan_print_partial.txt")
+	return b, errors.New("exit status 1")
 }
 
 func TestParseFRU(t *testing.T) {

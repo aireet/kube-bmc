@@ -314,12 +314,11 @@ spec:
                     type: string
                   usedPercent:
                     type: integer
-                required:
-                - entries
-                - usedPercent
                 type: object
               sensors:
-                description: SensorSummary counts sensors by state.
+                description: |-
+                  SensorSummary counts sensors by state.
+                  Counts are optional so status merge patches, which omit unchanged zeros, stay valid.
                 properties:
                   critical:
                     type: integer
@@ -331,12 +330,6 @@ spec:
                     type: integer
                   warning:
                     type: integer
-                required:
-                - critical
-                - noReading
-                - ok
-                - total
-                - warning
                 type: object
             type: object
         type: object

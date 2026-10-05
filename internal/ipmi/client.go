@@ -100,11 +100,12 @@ func (c *Client) LAN(ctx context.Context) (LAN, error) {
 	var errs []error
 	for _, ch := range []int{1, 2, 8, 3} {
 		out, err := c.Runner.Run(ctx, "lan", "print", strconv.Itoa(ch))
+		// Supermicro BMCs print the configuration, then exit 1 on an unsupported trailing
+		// parameter, so partial output is still used.
+		lan := ParseLAN(out)
 		if err != nil {
 			errs = append(errs, err)
-			continue
 		}
-		lan := ParseLAN(out)
 		if lan.IPAddress != "" && lan.IPAddress != "0.0.0.0" {
 			lan.Channel = ch
 			return lan, nil

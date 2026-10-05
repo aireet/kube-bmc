@@ -122,18 +122,19 @@ type Chassis struct {
 
 // SEL summarizes the System Event Log.
 type SEL struct {
-	Entries     int    `json:"entries"`
-	UsedPercent int    `json:"usedPercent"`
+	Entries     int    `json:"entries,omitempty"`
+	UsedPercent int    `json:"usedPercent,omitempty"`
 	LastAddTime string `json:"lastAddTime,omitempty"`
 }
 
 // SensorSummary counts sensors by state.
+// Counts are optional so status merge patches, which omit unchanged zeros, stay valid.
 type SensorSummary struct {
-	Total     int `json:"total"`
-	OK        int `json:"ok"`
-	Warning   int `json:"warning"`
-	Critical  int `json:"critical"`
-	NoReading int `json:"noReading"`
+	Total     int `json:"total,omitempty"`
+	OK        int `json:"ok,omitempty"`
+	Warning   int `json:"warning,omitempty"`
+	Critical  int `json:"critical,omitempty"`
+	NoReading int `json:"noReading,omitempty"`
 }
 
 // Problem is a human-readable reason that degrades health.

@@ -183,6 +183,6 @@ func (a *Agent) ensure(ctx context.Context) (*bmcv1.BMC, error) {
 	if err := a.k8s.Create(ctx, bmc); err != nil {
 		return nil, fmt.Errorf("create bmc: %w", err)
 	}
-	a.log.Info("registered BMC", "node", a.opts.NodeName)
+	a.log.Info("registered BMC")
 	return bmc, nil
 }

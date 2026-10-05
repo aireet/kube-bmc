@@ -152,16 +152,16 @@ const selColor = computed(() => {
               [t('faults'), s.chassis?.faults?.join(', ') || t('none')],
             ]" />
             <InfoCard :title="t('sel')" :icon="ListOutline" :rows="[
-              [t('selEntries'), s.sel?.entries],
+              [t('selEntries'), s.sel?.entries ?? 0],
               [t('lastEvent'), s.sel?.lastAddTime, true],
-              [t('sensorSummary'), s.sensors ? `${s.sensors.total} · ${s.sensors.ok} ok · ${s.sensors.warning} warn · ${s.sensors.critical} crit` : '—'],
+              [t('sensorSummary'), s.sensors ? `${s.sensors.total ?? 0} · ${s.sensors.ok ?? 0} ok · ${s.sensors.warning ?? 0} warn · ${s.sensors.critical ?? 0} crit` : '—'],
             ]">
               <n-progress type="line" :percentage="s.sel?.usedPercent ?? 0" :color="selColor" :height="8" style="margin-top: 14px" />
             </InfoCard>
           </div>
         </n-tab-pane>
 
-        <n-tab-pane name="sensors" :tab="`${t('sensors')}${s.sensors ? ` · ${s.sensors.total}` : ''}`">
+        <n-tab-pane name="sensors" :tab="`${t('sensors')}${s.sensors?.total ? ` · ${s.sensors.total}` : ''}`">
           <n-alert v-if="live.error.value && !snap" type="warning" :bordered="false" :title="t('liveUnavailable')">{{ live.error.value }}</n-alert>
           <n-skeleton v-else-if="!snap" text :repeat="8" />
           <SensorPanel v-else :sensors="snap.sensors ?? []" />
