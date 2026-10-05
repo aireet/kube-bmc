@@ -19,7 +19,7 @@ ui: ## Build the dashboard into web/dist.
 	cd ui && npm ci --no-audit --no-fund && npm run build
 
 LDFLAGS := -s -w -X main.version=$(VERSION)
-PLUGIN_PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+PLUGIN_PLATFORMS ?= linux/amd64 linux/arm64
 
 .PHONY: build
 build: ## Build kube-bmc and kubectl-bmc into bin/.
@@ -53,9 +53,9 @@ image: ## Build the container image.
 plugins: ## Cross-compile kubectl-bmc archives into dist/.
 	@mkdir -p dist
 	@for p in $(PLUGIN_PLATFORMS); do \
-		os=$${p%/*}; arch=$${p#*/}; ext=; [ $$os = windows ] && ext=.exe; \
+		os=$${p%/*}; arch=$${p#*/}; \
 		out=dist/kubectl-bmc_$${os}_$${arch}; mkdir -p $$out; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o $$out/kubectl-bmc$$ext ./cmd/kubectl-bmc || exit 1; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o $$out/kubectl-bmc ./cmd/kubectl-bmc || exit 1; \
 		cp LICENSE $$out/; tar -C $$out -czf $$out.tar.gz . && rm -rf $$out; \
 	done
 	@cd dist && sha256sum kubectl-bmc_*.tar.gz > kubectl-bmc_checksums.txt
