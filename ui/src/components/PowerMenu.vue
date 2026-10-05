@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { NButton, NDropdown, NModal, NInput, NIcon, NTooltip, useMessage } from 'naive-ui'
-import { PowerOutline, ChevronDownOutline } from '@vicons/ionicons5'
+import { NButton, NDropdown, NModal, NInput, NIcon, NPopover, useMessage } from 'naive-ui'
+import { PowerOutline, ChevronDownOutline, LockClosedOutline } from '@vicons/ionicons5'
 import { api } from '../api'
 import { config } from '../store'
 import { powerActions, type PowerAction, type View } from '../types'
@@ -49,17 +49,25 @@ async function run() {
 </script>
 
 <template>
-  <n-tooltip :disabled="!disabledReason">
+  <!-- Disabled buttons swallow hover events, so the reason is shown in a click popover instead. -->
+  <n-popover v-if="disabledReason" trigger="click" placement="bottom-end" style="max-width: 340px">
     <template #trigger>
-      <n-dropdown :options="options" trigger="click" :disabled="!!disabledReason" @select="pick">
-        <n-button :disabled="!!disabledReason" icon-placement="right">
-          <template #icon><n-icon :component="ChevronDownOutline" /></template>
-          <n-icon :component="PowerOutline" style="margin-right: 6px" />{{ t('powerActions') }}
-        </n-button>
-      </n-dropdown>
+      <n-button>
+        <n-icon :component="LockClosedOutline" style="margin-right: 6px" />{{ t('powerActions') }}
+      </n-button>
     </template>
-    {{ disabledReason }}
-  </n-tooltip>
+    <div class="why">
+      <b>{{ t('powerLocked') }}</b>
+      <p>{{ disabledReason }}</p>
+      <a href="https://github.com/aireet/kube-bmc#power-actions" target="_blank" rel="noopener">{{ t('howToEnable') }} →</a>
+    </div>
+  </n-popover>
+  <n-dropdown v-else :options="options" trigger="click" @select="pick">
+    <n-button icon-placement="right">
+      <template #icon><n-icon :component="ChevronDownOutline" /></template>
+      <n-icon :component="PowerOutline" style="margin-right: 6px" />{{ t('powerActions') }}
+    </n-button>
+  </n-dropdown>
 
   <n-modal :show="!!action" preset="dialog" type="warning" :title="t('confirmTitle')" :mask-closable="!busy"
     @update:show="(s: boolean) => !s && (action = undefined)">
@@ -72,3 +80,9 @@ async function run() {
     </template>
   </n-modal>
 </template>
+
+<style scoped>
+.why { font-size: 13px; line-height: 1.6; }
+.why p { margin: 4px 0 8px; }
+.why a { color: #18a058; text-decoration: none; }
+</style>
