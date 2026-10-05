@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- dashboard ----
-FROM --platform=$BUILDPLATFORM node:22-alpine AS ui
+FROM --platform=$BUILDPLATFORM node:26-alpine AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci --no-audit --no-fund
