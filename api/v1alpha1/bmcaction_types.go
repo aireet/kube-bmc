@@ -58,8 +58,8 @@ type BMCActionSpec struct {
 
 	Action PowerAction `json:"action"`
 
-	// RequestedBy is the identity of the requester. An admission policy shipped with
-	// kube-bmc requires it to match the authenticated Kubernetes user.
+	// RequestedBy is the identity of the requester. The kube-bmc server and kubectl-bmc
+	// set it to the authenticated user.
 	// +kubebuilder:validation:MinLength=1
 	RequestedBy string `json:"requestedBy"`
 

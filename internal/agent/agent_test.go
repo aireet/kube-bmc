@@ -205,8 +205,8 @@ func TestWriteReason(t *testing.T) {
 	}{
 		"first write":            {base, time.Time{}, "initial"},
 		"unchanged":              {base, recent, ""},
-		"watts within deadband":  {mutate(func(s *bmcv1.BMCStatus) { s.PowerWatts = ptr.To(int32(1090)) }), recent, ""},
-		"watts beyond deadband":  {mutate(func(s *bmcv1.BMCStatus) { s.PowerWatts = ptr.To(int32(1150)) }), recent, "readings"},
+		"watts within deadband":  {mutate(func(s *bmcv1.BMCStatus) { s.PowerWatts = ptr.To(int32(1190)) }), recent, ""},
+		"watts beyond deadband":  {mutate(func(s *bmcv1.BMCStatus) { s.PowerWatts = ptr.To(int32(1200)) }), recent, "readings"},
 		"inlet within deadband":  {mutate(func(s *bmcv1.BMCStatus) { s.InletTemperature = ptr.To(int32(27)) }), recent, ""},
 		"inlet beyond deadband":  {mutate(func(s *bmcv1.BMCStatus) { s.InletTemperature = ptr.To(int32(28)) }), recent, "readings"},
 		"new SEL entry":          {mutate(func(s *bmcv1.BMCStatus) { s.SEL.Entries, s.SEL.LastAddTime = 101, "t2" }), recent, ""},

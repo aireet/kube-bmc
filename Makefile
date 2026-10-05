@@ -30,6 +30,10 @@ build: ## Build kube-bmc and kubectl-bmc into bin/.
 test: ## Run unit tests.
 	go test -race -count=1 ./...
 
+.PHONY: e2e
+e2e: ## Run the end-to-end test in a temporary kind cluster (requires docker, kind, helm).
+	test/e2e/run.sh
+
 .PHONY: lint
 lint: ## Run golangci-lint and the UI type checker.
 	golangci-lint run

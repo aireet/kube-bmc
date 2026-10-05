@@ -33,13 +33,13 @@ server131   server131   10.20.0.31      Gooxi    SY8108G-G4   On      1240    43
 
 - **资产与健康**：支持任意 IPMI 2.0 BMC，采集 FRU、固件、管理网络、带阈值的传感器、机箱故障、DCMI 功耗和系统事件日志（SEL），汇总为 `OK` / `Warning` / `Critical` 健康状态，并给出问题列表。
 - **电源控制**（`On`、`GracefulShutdown`、`GracefulRestart`、`ForceRestart`、`PowerCycle`、`ForceOff`）：通过 Redfish 或 IPMI-over-LAN 执行。每次请求都是一个 `BMCAction` 对象，同时作为审计记录。默认关闭。
-- **三种入口，一套权限**：Web 控制台、`kubectl bmc` 插件和 MCP 接口，都基于 Kubernetes RBAC 授权。
-- **认证**：控制台使用 OpenID Connect 登录；API 和 MCP 客户端可使用 OIDC 或 Kubernetes bearer token。
+- **三种入口**：Web 控制台、`kubectl bmc` 插件和 MCP 接口。所有电源操作都会记录发起人身份。
+- **认证**：控制台使用 OpenID Connect 登录；API 和 MCP 客户端可使用 OIDC token，或 kube-bmc 所在 namespace 中 ServiceAccount 的 token。
 - **Prometheus 指标**：覆盖每个传感器，以及功耗、健康状态和 SEL 使用率。
 
 ## 安装
 
-要求 Kubernetes 1.30 及以上版本；节点需有 BMC，并已加载 `ipmi_si`、`ipmi_devintf` 内核模块（即存在 `/dev/ipmi0`）。
+要求 Kubernetes 1.28 及以上版本；节点需有 BMC，并已加载 `ipmi_si`、`ipmi_devintf` 内核模块（即存在 `/dev/ipmi0`）。
 
 ```bash
 helm install kube-bmc oci://ghcr.io/aireet/charts/kube-bmc \
@@ -57,12 +57,12 @@ kubectl -n kube-bmc-system port-forward svc/kube-bmc 8080:80
 - **Server**（Deployment）：提供控制台、JSON API 和 MCP 接口，负责用户认证，并运行执行 `BMCAction` 的 controller。本身无状态，通过 informer 缓存读取数据。
 - **kubectl 插件**：使用调用者的 kubeconfig，直接读写 `BMC` 和 `BMCAction`，并通过 API Server 的 pod proxy 从 agent 获取实时数据。
 
-## 电源操作与权限
+## 电源操作与认证
 
 - 电源操作以 `BMCAction` 对象的形式提交，由 server 通过带外通道执行一次，节点宕机时同样可用。执行结果会记录为 Node Event。
-- ValidatingAdmissionPolicy 要求 `spec.requestedBy` 等于实际认证的用户，防止伪造发起人；只有 kube-bmc server 可以代表控制台或 MCP 用户设置该字段。
+- `spec.requestedBy` 由 server（控制台和 MCP）和 kubectl-bmc 设置为已认证的用户。
 - `server.powerActions.enabled=false`（默认）时，所有操作都会被记录并拒绝。
-- Chart 提供两个 ClusterRole：`kube-bmc-viewer`（只读，默认聚合到内置的 `view` 角色）和 `kube-bmc-operator`（只读权限加创建 `BMCAction`）。通过 `rbac.viewers` / `rbac.operators` 绑定用户或组。OIDC 用户名和组默认加 `oidc:` 前缀。
+- kube-bmc 面向管理集群的运维团队：只做认证并记录发起人，所有已登录用户都拥有全部权限。能否登录在 IdP 侧控制。
 
 ## MCP 与 kubectl
 
@@ -75,7 +75,7 @@ kubectl bmc sensors server131 --problems
 kubectl bmc power server131 ForceRestart --reason "kernel hang" --wait
 ```
 
-MCP 工具包括 `fleet_summary`、`list_servers`、`get_server`、`get_sensors`、`get_events`、`list_actions`、`get_action` 和 `power_action`，另有提示词 `diagnose_server`。其中 `power_action` 标注为破坏性操作，必须填写原因，并受 `kube-bmc-operator` 角色约束。
+MCP 工具包括 `fleet_summary`、`list_servers`、`get_server`、`get_sensors`、`get_events`、`list_actions`、`get_action` 和 `power_action`，另有提示词 `diagnose_server`。其中 `power_action` 标注为破坏性操作，必须填写原因。
 
 详细文档：
 

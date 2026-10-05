@@ -1,0 +1,11 @@
+SEL Record ID          : 237c
+ Record Type           : 02
+ Timestamp             : 10/04/26 10/04/26
+ Generator ID          : 0020
+ EvM Revision          : 04
+ Sensor Type           : Session Audit
+ Sensor Number         : ff
+ Event Type            : Sensor-specific Discrete
+ Event Direction       : Assertion Event
+ Event Data            : f2ffff
+ Description           : 

@@ -25,11 +25,8 @@ const options = computed(() => [
       h('div', { class: 'who' }, [
         h('div', { class: 'who-name' }, display.value),
         h('div', { class: 'who-user mono' }, props.me.username),
-        h('div', { class: 'who-tags' }, [
-          h(NTag, { size: 'small', round: true, bordered: false, type: props.me.canOperate ? 'warning' : 'default' },
-            () => (props.me.canOperate ? t('roleOperator') : t('roleViewer'))),
-          ...(props.me.groups ?? []).slice(0, 6).map((g) => h(NTag, { size: 'small', round: true, bordered: false }, () => g)),
-        ]),
+        h('div', { class: 'who-tags' },
+          (props.me.groups ?? []).slice(0, 6).map((g) => h(NTag, { size: 'small', round: true, bordered: false }, () => g))),
       ]),
   },
   { key: 'divider', type: 'divider' },

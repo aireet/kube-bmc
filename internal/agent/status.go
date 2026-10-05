@@ -24,8 +24,8 @@ import (
 // Deadbands for readings. A reading change within its deadband is written only on the
 // next refresh.
 const (
-	wattsDeadbandRatio = 0.10
-	wattsDeadbandMin   = 50
+	wattsDeadbandRatio = 0.20
+	wattsDeadbandMin   = 100
 	inletDeadband      = 3
 	selDeadband        = 5 // percentage points
 	// problemClearDelay is how long a problem must be absent before it is removed. New

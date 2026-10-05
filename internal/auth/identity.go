@@ -1,10 +1,8 @@
-// Package auth authenticates dashboard, API and MCP requests and authorizes them
-// against Kubernetes RBAC.
+// Package auth authenticates dashboard, API and MCP requests.
 //
 // Identities come from an OIDC browser session, an OIDC bearer token, or a Kubernetes
-// bearer token (TokenReview). Authorization is delegated to the API server with
-// SubjectAccessReviews, so the same RBAC rules govern the dashboard, MCP clients and
-// kubectl.
+// bearer token (TokenReview). Every authenticated identity has full access; the identity
+// is recorded as the requester of power actions.
 package auth
 
 import "context"

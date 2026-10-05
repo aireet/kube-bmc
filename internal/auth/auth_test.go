@@ -19,7 +19,6 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	authenticationv1 "k8s.io/api/authentication/v1"
-	authorizationv1 "k8s.io/api/authorization/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -225,19 +224,23 @@ func TestBearerKubernetesToken(t *testing.T) {
 		Create: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.CreateOption) error {
 			tr := obj.(*authenticationv1.TokenReview)
 			reviews++
-			if tr.Spec.Token == "sa-token" {
+			switch tr.Spec.Token {
+			case "sa-token":
 				tr.Status.Authenticated = true
-				tr.Status.User = authenticationv1.UserInfo{Username: "system:serviceaccount:ops:agent", Groups: []string{"system:serviceaccounts"}}
+				tr.Status.User = authenticationv1.UserInfo{Username: "system:serviceaccount:kube-bmc-system:agent", Groups: []string{"system:serviceaccounts"}}
+			case "workload-token":
+				tr.Status.Authenticated = true
+				tr.Status.User = authenticationv1.UserInfo{Username: "system:serviceaccount:default:app"}
 			}
 			return nil
 		},
 	}).Build()
 	p := newProvider(t)
-	a := newAuthenticator(t, p, &TokenReviewer{Client: c, TTL: time.Minute})
+	a := newAuthenticator(t, p, &TokenReviewer{Client: c, Namespace: "kube-bmc-system", TTL: time.Minute})
 
 	for range 2 {
 		id, _, err := a.VerifyBearer(context.Background(), "sa-token")
-		if err != nil || id.Username != "system:serviceaccount:ops:agent" || id.Method != MethodKubernetes {
+		if err != nil || id.Username != "system:serviceaccount:kube-bmc-system:agent" || id.Method != MethodKubernetes {
 			t.Fatalf("id = %+v, err = %v", id, err)
 		}
 	}
@@ -246,6 +249,9 @@ func TestBearerKubernetesToken(t *testing.T) {
 	}
 	if _, _, err := a.VerifyBearer(context.Background(), "bogus"); err == nil {
 		t.Fatal("invalid token accepted")
+	}
+	if _, _, err := a.VerifyBearer(context.Background(), "workload-token"); err == nil {
+		t.Fatal("token of a ServiceAccount outside the kube-bmc namespace accepted")
 	}
 }
 
@@ -295,40 +301,5 @@ func TestSafeRedirect(t *testing.T) {
 		if got := safeRedirect(in); got != want {
 			t.Errorf("safeRedirect(%q) = %q, want %q", in, got, want)
 		}
-	}
-}
-
-func TestRBACAuthorizer(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	calls := 0
-	c := fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
-		Create: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.CreateOption) error {
-			sar := obj.(*authorizationv1.SubjectAccessReview)
-			calls++
-			attrs := sar.Spec.ResourceAttributes
-			sar.Status.Allowed = attrs.Verb == "list" && attrs.Resource == "bmcs" ||
-				attrs.Resource == "bmcactions" && attrs.Verb == "create" && len(sar.Spec.Groups) > 0 && sar.Spec.Groups[0] == "oidc:sre"
-			return nil
-		},
-	}).Build()
-	r := &RBAC{Client: c, TTL: time.Minute}
-	ctx := context.Background()
-	sre := Identity{Username: "oidc:alice", Groups: []string{"oidc:sre"}}
-	dev := Identity{Username: "oidc:bob", Groups: []string{"oidc:dev"}}
-
-	check := func(id Identity, p Permission, want bool) {
-		t.Helper()
-		if got, err := r.Authorize(ctx, id, p); err != nil || got != want {
-			t.Fatalf("%s %s: got %v (%v), want %v", id.Username, p, got, err, want)
-		}
-	}
-	check(sre, Read, true)
-	check(sre, Operate, true)
-	check(dev, Read, true)
-	check(dev, Operate, false)
-	check(dev, Operate, false)
-	if calls != 4 {
-		t.Fatalf("%d access reviews; want 4 with caching", calls)
 	}
 }

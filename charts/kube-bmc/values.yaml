@@ -76,11 +76,13 @@ server:
   podAnnotations: {}
 
 auth:
-  # none: no authentication; every request has full access.
+  # none: no authentication.
   # oidc: browser sign-in with OpenID Connect; API and MCP clients send OIDC or Kubernetes
-  #       bearer tokens. Authorization uses Kubernetes RBAC (see rbac below).
+  #       bearer tokens. Every authenticated user has full access, so restrict who can
+  #       sign in at the identity provider.
   mode: none
-  # Also accept Kubernetes bearer tokens (ServiceAccount tokens, `kubectl create token`).
+  # Also accept tokens of ServiceAccounts in the release namespace, for automation such as
+  # MCP clients: `kubectl -n <namespace> create token <serviceaccount>`.
   kubernetesTokens: true
   sessionTTL: 12h
   oidc:
@@ -100,14 +102,6 @@ auth:
     clientSecret: ""
     sessionSecret: ""
 
-rbac:
-  # Subjects bound to the kube-bmc-viewer role (read BMCs, actions and live data).
-  # Example: [{kind: Group, name: "oidc:sre", apiGroup: rbac.authorization.k8s.io}]
-  viewers: []
-  # Subjects bound to the kube-bmc-operator role (viewer plus requesting power actions).
-  operators: []
-  # Aggregate the viewer role into the built-in "view" ClusterRole.
-  aggregateToView: true
 
 metrics:
   # Create a PodMonitor for the agents (requires the Prometheus Operator CRDs).

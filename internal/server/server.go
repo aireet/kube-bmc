@@ -102,7 +102,6 @@ type Options struct {
 	Config  Config
 	UI      fs.FS
 	Authn   Authenticator
-	Authz   auth.Authorizer
 	// MCP is mounted at /mcp when set.
 	MCP http.Handler
 	// ProtectedResourceMetadata is served at /.well-known/oauth-protected-resource when set.
@@ -117,12 +116,12 @@ func New(o Options) *Server { return &Server{o} }
 func (s *Server) Handler() http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/v1/me", s.me)
-	api.HandleFunc("GET /api/v1/bmcs", s.require(auth.Read, s.list))
-	api.HandleFunc("GET /api/v1/bmcs/{name}", s.require(auth.Read, s.get))
-	api.HandleFunc("GET /api/v1/bmcs/{name}/live", s.require(auth.Read, s.live))
-	api.HandleFunc("POST /api/v1/bmcs/{name}/power", s.require(auth.Operate, s.power))
-	api.HandleFunc("GET /api/v1/actions", s.require(auth.Read, s.listActions))
-	api.HandleFunc("GET /api/v1/actions/{name}", s.require(auth.Read, s.getAction))
+	api.HandleFunc("GET /api/v1/bmcs", s.list)
+	api.HandleFunc("GET /api/v1/bmcs/{name}", s.get)
+	api.HandleFunc("GET /api/v1/bmcs/{name}/live", s.live)
+	api.HandleFunc("POST /api/v1/bmcs/{name}/power", s.power)
+	api.HandleFunc("GET /api/v1/actions", s.listActions)
+	api.HandleFunc("GET /api/v1/actions/{name}", s.getAction)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
@@ -141,45 +140,9 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// require wraps h with an authorization check for p.
-func (s *Server) require(p auth.Permission, h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, _ := auth.FromContext(r.Context())
-		ok, err := s.Authz.Authorize(r.Context(), id, p)
-		if err != nil {
-			s.Log.Error("authorization failed", "user", id.Username, "permission", p, "err", err)
-			writeError(w, http.StatusInternalServerError, "authorization check failed")
-			return
-		}
-		if !ok {
-			writeError(w, http.StatusForbidden, forbiddenMessage(id, p))
-			return
-		}
-		h(w, r)
-	}
-}
-
-func forbiddenMessage(id auth.Identity, p auth.Permission) string {
-	if p == auth.Operate {
-		return id.Username + " is not allowed to create bmcactions.bmc.kube-bmc.io"
-	}
-	return id.Username + " is not allowed to list bmcs.bmc.kube-bmc.io"
-}
-
-type meResponse struct {
-	auth.Identity
-	CanRead    bool `json:"canRead"`
-	CanOperate bool `json:"canOperate"`
-}
-
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	id, _ := auth.FromContext(r.Context())
-	read, err1 := s.Authz.Authorize(r.Context(), id, auth.Read)
-	operate, err2 := s.Authz.Authorize(r.Context(), id, auth.Operate)
-	if err := errors.Join(err1, err2); err != nil {
-		s.Log.Error("authorization failed", "user", id.Username, "err", err)
-	}
-	writeJSON(w, http.StatusOK, meResponse{Identity: id, CanRead: read, CanOperate: operate})
+	writeJSON(w, http.StatusOK, id)
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {

@@ -1,8 +1,7 @@
 // Package mcpserver exposes kube-bmc to AI agents over the Model Context Protocol.
 //
-// Every tool call is authorized with the caller's identity, so agents are subject to the
-// same Kubernetes RBAC as the dashboard and kubectl. Power actions are created as
-// BMCAction objects and executed by the controller, exactly like requests from the UI.
+// Power actions are created as BMCAction objects with the caller's identity as requester
+// and executed by the controller, exactly like requests from the dashboard.
 package mcpserver
 
 import (
@@ -24,7 +23,6 @@ import (
 // Options configures the MCP server.
 type Options struct {
 	Backend      server.Backend
-	Authz        auth.Authorizer
 	PowerActions bool
 	Version      string
 }
@@ -107,21 +105,6 @@ func identity(req *mcp.CallToolRequest) auth.Identity {
 	return auth.Anonymous
 }
 
-func (t *tools) authorize(ctx context.Context, req *mcp.CallToolRequest, p auth.Permission) (auth.Identity, error) {
-	id := identity(req)
-	ok, err := t.Authz.Authorize(ctx, id, p)
-	if err != nil {
-		return id, fmt.Errorf("authorization check failed: %w", err)
-	}
-	if !ok {
-		if p == auth.Operate {
-			return id, fmt.Errorf("%s is not allowed to create bmcactions.bmc.kube-bmc.io", id.Username)
-		}
-		return id, fmt.Errorf("%s is not allowed to list bmcs.bmc.kube-bmc.io", id.Username)
-	}
-	return id, nil
-}
-
 // ServerSummary is a compact view of one server.
 type ServerSummary struct {
 	Name             string           `json:"name"`
@@ -162,9 +145,6 @@ type FleetSummary struct {
 }
 
 func (t *tools) fleetSummary(ctx context.Context, req *mcp.CallToolRequest, _ fleetIn) (*mcp.CallToolResult, FleetSummary, error) {
-	if _, err := t.authorize(ctx, req, auth.Read); err != nil {
-		return nil, FleetSummary{}, err
-	}
 	views, err := t.Backend.List(ctx)
 	if err != nil {
 		return nil, FleetSummary{}, err
@@ -203,9 +183,6 @@ type ServerList struct {
 }
 
 func (t *tools) listServers(ctx context.Context, req *mcp.CallToolRequest, in listIn) (*mcp.CallToolResult, ServerList, error) {
-	if _, err := t.authorize(ctx, req, auth.Read); err != nil {
-		return nil, ServerList{}, err
-	}
 	views, err := t.Backend.List(ctx)
 	if err != nil {
 		return nil, ServerList{}, err
@@ -235,9 +212,6 @@ type ServerDetail struct {
 }
 
 func (t *tools) getServer(ctx context.Context, req *mcp.CallToolRequest, in nameIn) (*mcp.CallToolResult, ServerDetail, error) {
-	if _, err := t.authorize(ctx, req, auth.Read); err != nil {
-		return nil, ServerDetail{}, err
-	}
 	v, err := t.Backend.Get(ctx, in.Name)
 	return nil, ServerDetail{Server: v}, err
 }
@@ -254,9 +228,6 @@ type SensorList struct {
 }
 
 func (t *tools) getSensors(ctx context.Context, req *mcp.CallToolRequest, in sensorsIn) (*mcp.CallToolResult, SensorList, error) {
-	if _, err := t.authorize(ctx, req, auth.Read); err != nil {
-		return nil, SensorList{}, err
-	}
 	snap, err := t.Backend.Live(ctx, in.Name)
 	if err != nil {
 		return nil, SensorList{}, err
@@ -290,9 +261,6 @@ type EventList struct {
 }
 
 func (t *tools) getEvents(ctx context.Context, req *mcp.CallToolRequest, in eventsIn) (*mcp.CallToolResult, EventList, error) {
-	if _, err := t.authorize(ctx, req, auth.Read); err != nil {
-		return nil, EventList{}, err
-	}
 	snap, err := t.Backend.Live(ctx, in.Name)
 	if err != nil {
 		return nil, EventList{}, err
@@ -347,9 +315,6 @@ type ActionList struct {
 }
 
 func (t *tools) listActions(ctx context.Context, req *mcp.CallToolRequest, in listActionsIn) (*mcp.CallToolResult, ActionList, error) {
-	if _, err := t.authorize(ctx, req, auth.Read); err != nil {
-		return nil, ActionList{}, err
-	}
 	actions, err := t.Backend.ListActions(ctx, in.BMC)
 	if err != nil {
 		return nil, ActionList{}, err
@@ -366,9 +331,6 @@ type getActionIn struct {
 }
 
 func (t *tools) getAction(ctx context.Context, req *mcp.CallToolRequest, in getActionIn) (*mcp.CallToolResult, ActionSummary, error) {
-	if _, err := t.authorize(ctx, req, auth.Read); err != nil {
-		return nil, ActionSummary{}, err
-	}
 	a, err := t.Backend.GetAction(ctx, in.Name)
 	if err != nil {
 		return nil, ActionSummary{}, err
@@ -383,10 +345,7 @@ type powerIn struct {
 }
 
 func (t *tools) powerAction(ctx context.Context, req *mcp.CallToolRequest, in powerIn) (*mcp.CallToolResult, ActionSummary, error) {
-	id, err := t.authorize(ctx, req, auth.Operate)
-	if err != nil {
-		return nil, ActionSummary{}, err
-	}
+	id := identity(req)
 	if !t.PowerActions {
 		return nil, ActionSummary{}, errors.New("power actions are disabled on this kube-bmc server")
 	}

@@ -81,6 +81,22 @@ func TestStatus(t *testing.T) {
 	}
 }
 
+func TestLoginFailures(t *testing.T) {
+	s := &Snapshot{MC: ipmi.MCInfo{FirmwareVersion: "1"}}
+	for range 12 {
+		s.Events = append(s.Events, ipmi.Event{Sensor: "Session Audit #0xff", Event: "Invalid username or password"})
+	}
+	h, _, problems := Evaluate(s)
+	if h != bmcv1.HealthWarning || len(problems) != 1 || problems[0].Source != "security" ||
+		problems[0].Message != "12 failed BMC logins among the newest 12 SEL entries" {
+		t.Fatalf("health = %s, problems = %+v", h, problems)
+	}
+	s.Events = s.Events[:3]
+	if h, _, _ := Evaluate(s); h != bmcv1.HealthOK {
+		t.Fatalf("three failures reported as %s", h)
+	}
+}
+
 func TestInletTemperature(t *testing.T) {
 	a, b, c := 60.0, 44.0, 30.0
 	got, ok := InletTemperature([]ipmi.Sensor{

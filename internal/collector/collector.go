@@ -55,15 +55,22 @@ type Collector struct {
 	selSeenAt string // SEL "Last Add Time" at the last read
 	selBusy   bool
 	updates   chan struct{}
+	// described caches decoded descriptions of SEL entries. Entries are immutable, so the
+	// key only has to distinguish reused record IDs after the log was cleared.
+	described map[string]string
 }
+
+// maxSELLookups bounds the `sel get` calls per SEL read.
+const maxSELLookups = 25
 
 func New(node string, client *ipmi.Client, opts Options, log *slog.Logger) *Collector {
 	return &Collector{
-		client:  client,
-		opts:    opts,
-		log:     log,
-		snap:    Snapshot{Node: node, PowerWatts: -1, Errors: map[string]string{}},
-		updates: make(chan struct{}, 1),
+		client:    client,
+		opts:      opts,
+		log:       log,
+		snap:      Snapshot{Node: node, PowerWatts: -1, Errors: map[string]string{}},
+		updates:   make(chan struct{}, 1),
+		described: map[string]string{},
 	}
 }
 
@@ -229,6 +236,7 @@ func (c *Collector) maybeReadSEL(ctx context.Context) {
 			ev, err := c.client.SEL(ctx, c.opts.SELEntries)
 			if err == nil {
 				slices.Reverse(ev) // newest first
+				c.describe(ctx, ev)
 				c.set(func(s *Snapshot) { s.Events = ev })
 			}
 			return err
@@ -237,6 +245,33 @@ func (c *Collector) maybeReadSEL(ctx context.Context) {
 		c.selBusy, c.selReadAt, c.selSeenAt = false, time.Now(), last
 		c.mu.Unlock()
 	}()
+}
+
+// describe fills in descriptions that ipmitool left empty by decoding the raw event data.
+func (c *Collector) describe(ctx context.Context, events []ipmi.Event) {
+	lookups := 0
+	for i := range events {
+		e := &events[i]
+		if e.Event != "" {
+			continue
+		}
+		key := e.ID + "|" + e.Timestamp + "|" + e.Sensor
+		desc, ok := c.described[key]
+		if !ok {
+			if lookups == maxSELLookups {
+				continue
+			}
+			lookups++
+			if r, err := c.client.SELRecord(ctx, e.ID); err == nil {
+				desc = r.Describe()
+			}
+			if len(c.described) > 4*c.opts.SELEntries {
+				clear(c.described)
+			}
+			c.described[key] = desc
+		}
+		e.Event = desc
+	}
 }
 
 func (c *Collector) set(fn func(*Snapshot)) {

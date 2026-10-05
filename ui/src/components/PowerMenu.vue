@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { NButton, NDropdown, NModal, NInput, NIcon, NPopover, NFormItem, useMessage } from 'naive-ui'
 import { PowerOutline, ChevronDownOutline, LockClosedOutline } from '@vicons/ionicons5'
 import { api } from '../api'
-import { config, me } from '../store'
+import { config } from '../store'
 import { phaseDone, powerActions, type PowerAction, type View } from '../types'
 import { t } from '../i18n'
 
@@ -13,7 +13,6 @@ const message = useMessage()
 
 const lockedReason = computed(() => {
   if (!config.value.powerActions) return t('powerDisabled')
-  if (me.value && !me.value.canOperate) return t('noOperatePermission', { user: me.value.username })
   if (!props.v.oobConfigured) return t('oobMissing')
   return ''
 })

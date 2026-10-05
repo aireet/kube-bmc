@@ -82,19 +82,11 @@ func (b *backend) GetAction(_ context.Context, name string) (*bmcv1.BMCAction, e
 	return nil, server.ErrNotFound
 }
 
-// roles grants permissions per username.
-type roles map[string][]auth.Permission
-
-func (r roles) Authorize(_ context.Context, id auth.Identity, p auth.Permission) (bool, error) {
-	return slices.Contains(r[id.Username], p), nil
-}
-
 // connect starts the MCP endpoint behind bearer authentication, where the token is the
 // username, and returns a session authenticated as user.
 func connect(t *testing.T, b *backend, powerActions bool, user string) *mcp.ClientSession {
 	t.Helper()
-	srv := New(Options{Backend: b, PowerActions: powerActions, Version: "test",
-		Authz: roles{"viewer": {auth.Read}, "operator": {auth.Read, auth.Operate}}})
+	srv := New(Options{Backend: b, PowerActions: powerActions, Version: "test"})
 	verifier := func(_ context.Context, token string, _ *http.Request) (*mcpauth.TokenInfo, error) {
 		if token == "" {
 			return nil, mcpauth.ErrInvalidToken
@@ -194,15 +186,11 @@ func TestTools(t *testing.T) {
 	}
 }
 
-func TestPowerActionAuthorization(t *testing.T) {
+func TestPowerAction(t *testing.T) {
 	b := &backend{}
 	args := map[string]any{"name": "gpu-02", "action": "ForceRestart", "reason": "fan replaced"}
 	var a ActionSummary
 
-	if err := call(t, connect(t, b, true, "viewer"), "power_action", args, &a); err == nil ||
-		!strings.Contains(err.Error(), "viewer is not allowed to create bmcactions") {
-		t.Fatalf("viewer: %v", err)
-	}
 	if err := call(t, connect(t, b, false, "operator"), "power_action", args, &a); err == nil ||
 		!strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("disabled: %v", err)

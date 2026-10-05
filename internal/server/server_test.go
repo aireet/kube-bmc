@@ -69,18 +69,6 @@ func newTestBackend(t *testing.T, extra ...client.Object) (*Kube, client.Client)
 	}), c
 }
 
-// permissions grants each user a fixed set of permissions.
-type permissions map[string][]auth.Permission
-
-func (p permissions) Authorize(_ context.Context, id auth.Identity, perm auth.Permission) (bool, error) {
-	for _, x := range p[id.Username] {
-		if x == perm {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // headerAuthn identifies callers by the X-Test-User header.
 type headerAuthn struct{}
 
@@ -107,7 +95,6 @@ func testHandler(t *testing.T, powerActions bool) (http.Handler, client.Client) 
 		Config:  Config{Version: "test", PowerActions: powerActions},
 		UI:      fstest.MapFS{"index.html": {Data: []byte("<html>kube-bmc</html>")}, "assets/app.js": {Data: []byte("1")}},
 		Authn:   headerAuthn{},
-		Authz:   permissions{"viewer": {auth.Read}, "operator": {auth.Read, auth.Operate}},
 		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}).Handler(), c
 }
@@ -128,19 +115,16 @@ func do(t *testing.T, h http.Handler, user, method, path, body string) *httptest
 
 func TestReadEndpoints(t *testing.T) {
 	h, _ := testHandler(t, false)
-	rec := do(t, h, "viewer", "GET", "/api/v1/bmcs", "")
+	rec := do(t, h, "alice", "GET", "/api/v1/bmcs", "")
 	var views []View
 	if err := json.Unmarshal(rec.Body.Bytes(), &views); err != nil || len(views) != 1 || views[0].Agent == nil || views[0].Stale {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body)
 	}
-	if rec := do(t, h, "viewer", "GET", "/api/v1/bmcs/gpu-01/live", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), "Inlet_Temp") {
+	if rec := do(t, h, "alice", "GET", "/api/v1/bmcs/gpu-01/live", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), "Inlet_Temp") {
 		t.Fatalf("live: %d %s", rec.Code, rec.Body)
 	}
-	if rec := do(t, h, "viewer", "GET", "/api/v1/bmcs/missing", ""); rec.Code != 404 {
+	if rec := do(t, h, "alice", "GET", "/api/v1/bmcs/missing", ""); rec.Code != 404 {
 		t.Fatalf("missing: %d", rec.Code)
-	}
-	if rec := do(t, h, "nobody", "GET", "/api/v1/bmcs", ""); rec.Code != 403 {
-		t.Fatalf("unauthorized user: %d", rec.Code)
 	}
 	if rec := do(t, h, "", "GET", "/api/v1/bmcs", ""); rec.Code != 401 {
 		t.Fatalf("unauthenticated: %d", rec.Code)
@@ -174,10 +158,10 @@ func TestStaleness(t *testing.T) {
 
 func TestMe(t *testing.T) {
 	h, _ := testHandler(t, true)
-	rec := do(t, h, "viewer", "GET", "/api/v1/me", "")
-	var me meResponse
+	rec := do(t, h, "alice", "GET", "/api/v1/me", "")
+	var me auth.Identity
 	_ = json.Unmarshal(rec.Body.Bytes(), &me)
-	if me.Username != "viewer" || !me.CanRead || me.CanOperate {
+	if me.Username != "alice" {
 		t.Fatalf("me = %+v", me)
 	}
 }
@@ -186,10 +170,7 @@ func TestPowerCreatesAction(t *testing.T) {
 	h, c := testHandler(t, true)
 	body := `{"action":"ForceRestart","confirm":"gpu-01","reason":"kernel hang"}`
 
-	if rec := do(t, h, "viewer", "POST", "/api/v1/bmcs/gpu-01/power", body); rec.Code != 403 {
-		t.Fatalf("viewer: %d", rec.Code)
-	}
-	rec := do(t, h, "operator", "POST", "/api/v1/bmcs/gpu-01/power", body)
+	rec := do(t, h, "alice", "POST", "/api/v1/bmcs/gpu-01/power", body)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("operator: %d %s", rec.Code, rec.Body)
 	}
@@ -199,10 +180,10 @@ func TestPowerCreatesAction(t *testing.T) {
 		t.Fatalf("%d actions created", len(list.Items))
 	}
 	a := list.Items[0].Spec
-	if a.BMCName != "gpu-01" || a.Action != bmcv1.ActionForceRestart || a.RequestedBy != "operator" || a.Reason != "kernel hang" {
+	if a.BMCName != "gpu-01" || a.Action != bmcv1.ActionForceRestart || a.RequestedBy != "alice" || a.Reason != "kernel hang" {
 		t.Fatalf("spec = %+v", a)
 	}
-	if rec := do(t, h, "operator", "GET", "/api/v1/actions?bmc=gpu-01", ""); !strings.Contains(rec.Body.String(), "ForceRestart") {
+	if rec := do(t, h, "alice", "GET", "/api/v1/actions?bmc=gpu-01", ""); !strings.Contains(rec.Body.String(), "ForceRestart") {
 		t.Fatalf("actions: %s", rec.Body)
 	}
 }
@@ -215,16 +196,16 @@ func TestPowerValidation(t *testing.T) {
 		`not json`: http.StatusBadRequest,
 		`{"action":"ForceOff","confirm":"missing"}`: http.StatusBadRequest,
 	} {
-		if rec := do(t, h, "operator", "POST", "/api/v1/bmcs/gpu-01/power", body); rec.Code != want {
+		if rec := do(t, h, "alice", "POST", "/api/v1/bmcs/gpu-01/power", body); rec.Code != want {
 			t.Errorf("%s: got %d, want %d", body, rec.Code, want)
 		}
 	}
-	if rec := do(t, h, "operator", "POST", "/api/v1/bmcs/missing/power", `{"action":"On","confirm":"missing"}`); rec.Code != 404 {
+	if rec := do(t, h, "alice", "POST", "/api/v1/bmcs/missing/power", `{"action":"On","confirm":"missing"}`); rec.Code != 404 {
 		t.Errorf("unknown BMC: %d", rec.Code)
 	}
 
 	req := httptest.NewRequest("POST", "/api/v1/bmcs/gpu-01/power", strings.NewReader(`{"action":"On","confirm":"gpu-01"}`))
-	req.Header.Set("X-Test-User", "operator")
+	req.Header.Set("X-Test-User", "alice")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -233,7 +214,7 @@ func TestPowerValidation(t *testing.T) {
 	}
 
 	disabled, _ := testHandler(t, false)
-	if rec := do(t, disabled, "operator", "POST", "/api/v1/bmcs/gpu-01/power", `{"action":"On","confirm":"gpu-01"}`); rec.Code != 403 {
+	if rec := do(t, disabled, "alice", "POST", "/api/v1/bmcs/gpu-01/power", `{"action":"On","confirm":"gpu-01"}`); rec.Code != 403 {
 		t.Errorf("disabled: %d", rec.Code)
 	}
 }

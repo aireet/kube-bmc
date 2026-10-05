@@ -116,8 +116,6 @@ export interface Me {
   email?: string
   name?: string
   method: 'none' | 'session' | 'oidc-token' | 'kubernetes'
-  canRead: boolean
-  canOperate: boolean
 }
 
 export const powerActions = ['On', 'GracefulShutdown', 'GracefulRestart', 'ForceRestart', 'PowerCycle', 'ForceOff'] as const

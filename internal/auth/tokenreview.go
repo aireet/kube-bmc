@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,11 +13,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// TokenReviewer authenticates Kubernetes bearer tokens (for example ServiceAccount
-// tokens issued with `kubectl create token`) with the TokenReview API.
+// TokenReviewer authenticates Kubernetes ServiceAccount tokens with the TokenReview API.
+// Only ServiceAccounts in Namespace are accepted, so that tokens of arbitrary workloads in
+// the cluster do not grant access.
 type TokenReviewer struct {
-	Client client.Client
-	TTL    time.Duration
+	Client    client.Client
+	Namespace string
+	TTL       time.Duration
 
 	mu    sync.Mutex
 	cache map[[32]byte]reviewed
@@ -43,9 +46,13 @@ func (t *TokenReviewer) Review(ctx context.Context, token string) (Identity, err
 	}
 	var id Identity
 	var err error
-	if tr.Status.Authenticated {
+	prefix := "system:serviceaccount:" + t.Namespace + ":"
+	switch {
+	case tr.Status.Authenticated && strings.HasPrefix(tr.Status.User.Username, prefix):
 		id = Identity{Username: tr.Status.User.Username, Groups: tr.Status.User.Groups, Method: MethodKubernetes}
-	} else {
+	case tr.Status.Authenticated:
+		err = fmt.Errorf("%s is not a ServiceAccount in namespace %s", tr.Status.User.Username, t.Namespace)
+	default:
 		err = errors.New("token is not valid for the Kubernetes API server")
 		if tr.Status.Error != "" {
 			err = errors.New(tr.Status.Error)

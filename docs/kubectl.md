@@ -20,17 +20,17 @@ Or build it from source: `go install github.com/aireet/kube-bmc/cmd/kubectl-bmc@
 
 ## Commands
 
-| Command | Description | Required permissions |
-|---|---|---|
-| `kubectl bmc list [-o wide\|json\|yaml\|name] [--health H]` | BMCs with health, power and inventory | `list bmcs` |
-| `kubectl bmc describe NAME` | Inventory, health, problems and recent actions | `get bmcs`, `list bmcactions` |
-| `kubectl bmc sensors NAME [--type T] [--problems] [--all]` | Live sensor readings and thresholds | `get bmcs`, `pods`/`pods/proxy` in the kube-bmc namespace |
-| `kubectl bmc events NAME [--limit N] [--grep TEXT]` | Newest System Event Log entries | as `sensors` |
-| `kubectl bmc power NAME ACTION --reason TEXT [--yes] [--wait]` | Request a power action | `create bmcactions` |
-| `kubectl bmc actions [NAME]` | Power actions, newest first | `list bmcactions` |
+| Command | Description |
+|---|---|
+| `kubectl bmc list [-o wide\|json\|yaml\|name] [--health H]` | BMCs with health, power and inventory |
+| `kubectl bmc describe NAME` | Inventory, health, problems and recent actions |
+| `kubectl bmc sensors NAME [--type T] [--problems] [--all]` | Live sensor readings and thresholds |
+| `kubectl bmc events NAME [--limit N] [--grep TEXT]` | Newest System Event Log entries |
+| `kubectl bmc power NAME ACTION --reason TEXT [--yes] [--wait]` | Request a power action |
+| `kubectl bmc actions [NAME]` | Power actions, newest first |
 
-The `kube-bmc-viewer` and `kube-bmc-operator` roles, bound through the chart's `rbac` values,
-grant these permissions (see [authentication.md](authentication.md)).
+The plugin is meant for cluster administrators. Live data (`sensors`, `events`) is read from
+the agents through the API server's pod proxy.
 
 Global flags include the standard kubeconfig flags (`--context`, `--kubeconfig`, ...) and
 `--kube-bmc-namespace` (default `kube-bmc-system`).
@@ -46,5 +46,4 @@ Succeeded: ForceRestart accepted by the BMC
 ```
 
 The plugin sets `spec.requestedBy` to your username, as reported by the SelfSubjectReview API.
-The admission policy installed by the chart rejects any other value. `--yes` skips the
-confirmation prompt for use in scripts.
+`--yes` skips the confirmation prompt for use in scripts.

@@ -15,9 +15,12 @@ All notable changes to this project are documented in this file. The format foll
 - Dashboard (Vue 3, Naive UI): fleet overview, server details, sensors, event log, action history,
   English and Chinese, light and dark themes.
 - Authentication with OpenID Connect (authorization code flow with PKCE) and bearer tokens
-  (OIDC ID tokens and Kubernetes tokens); authorization with Kubernetes RBAC through
-  SubjectAccessReviews.
+  (OIDC ID tokens and tokens of ServiceAccounts in the kube-bmc namespace).
 - MCP endpoint (`/mcp`, Streamable HTTP) with read tools, a power action tool and a diagnosis prompt.
 - `kubectl bmc` plugin: list, describe, sensors, events, power and actions.
-- Helm chart with `kube-bmc-viewer` and `kube-bmc-operator` roles and a ValidatingAdmissionPolicy
-  that enforces `BMCAction.spec.requestedBy`.
+- Helm chart and plain install manifest.
+- Agent heartbeat Lease and deadband status writes: the status is written on meaningful changes,
+  problems are debounced, and readings are refreshed every 10 minutes.
+- Decoding of sensor-specific SEL events that ipmitool leaves undescribed, and a security
+  problem for repeated failed BMC logins.
+- Fallback to a raw IPMI request for the LAN gateway when `lan print` stops early.

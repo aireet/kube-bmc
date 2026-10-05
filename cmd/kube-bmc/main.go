@@ -193,7 +193,7 @@ func runServer(ctx context.Context, args []string) error {
 	clusterName := fs.String("cluster-name", "", "cluster name shown in the dashboard")
 	externalURL := fs.String("external-url", "", "public base URL of the dashboard, e.g. https://kube-bmc.example.com")
 	authMode := fs.String("auth", "none", "authentication mode: none or oidc")
-	kubeTokens := fs.Bool("kubernetes-tokens", true, "with --auth=oidc, also accept Kubernetes bearer tokens (TokenReview)")
+	kubeTokens := fs.Bool("kubernetes-tokens", true, "with --auth=oidc, also accept tokens of ServiceAccounts in --namespace")
 	issuer := fs.String("oidc-issuer-url", "", "OIDC issuer URL")
 	clientID := fs.String("oidc-client-id", "", "OIDC client ID")
 	clientSecret := fs.String("oidc-client-secret", "", "OIDC client secret (defaults to $OIDC_CLIENT_SECRET)")
@@ -243,12 +243,11 @@ func runServer(ctx context.Context, args []string) error {
 		return err
 	}
 
-	var authz auth.Authorizer = auth.AllowAll{}
 	authOpts := auth.Options{SessionTTL: *sessionTTL, SecureCookies: strings.HasPrefix(base, "https://"), Log: log}
 	var prm http.Handler
 	switch *authMode {
 	case "none":
-		log.Warn("authentication is disabled; anyone who can reach the server can read BMC data")
+		log.Warn("authentication is disabled; anyone who can reach the server has full access")
 	case "oidc":
 		if base == "" {
 			return errors.New("--external-url is required with --auth=oidc")
@@ -268,9 +267,8 @@ func runServer(ctx context.Context, args []string) error {
 		}
 		authOpts.OIDC, authOpts.SessionSecret = o, secret
 		if *kubeTokens {
-			authOpts.Tokens = &auth.TokenReviewer{Client: mgr.GetClient(), TTL: time.Minute}
+			authOpts.Tokens = &auth.TokenReviewer{Client: mgr.GetClient(), Namespace: *namespace, TTL: time.Minute}
 		}
-		authz = &auth.RBAC{Client: mgr.GetClient(), TTL: 30 * time.Second}
 		prm = mcpauth.ProtectedResourceMetadataHandler(&oauthex.ProtectedResourceMetadata{
 			Resource:               base + "/mcp",
 			AuthorizationServers:   []string{o.Issuer()},
@@ -288,7 +286,7 @@ func runServer(ctx context.Context, args []string) error {
 	backend := server.NewKube(mgr.GetClient(), server.KubeOptions{
 		Namespace: *namespace, AgentSelector: sel, AgentPort: *agentPort, Credentials: credentials, StaleAfter: *staleAfter,
 	})
-	mcpSrv := mcpserver.New(mcpserver.Options{Backend: backend, Authz: authz, PowerActions: *powerActions, Version: version})
+	mcpSrv := mcpserver.New(mcpserver.Options{Backend: backend, PowerActions: *powerActions, Version: version})
 	var mcpHandler http.Handler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv },
 		&mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
 	if authn.Enabled() {
@@ -302,7 +300,7 @@ func runServer(ctx context.Context, args []string) error {
 		Handler: server.New(server.Options{
 			Backend: backend,
 			Config:  server.Config{Version: version, PowerActions: *powerActions, ClusterName: *clusterName, Login: authn.LoginEnabled()},
-			UI:      web.FS(), Authn: authn, Authz: authz, MCP: mcpHandler, ProtectedResourceMetadata: prm, Log: log,
+			UI:      web.FS(), Authn: authn, MCP: mcpHandler, ProtectedResourceMetadata: prm, Log: log,
 		}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

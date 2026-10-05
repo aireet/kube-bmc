@@ -8,16 +8,16 @@ The endpoint is stateless, so it can be served by several replicas without sessi
 
 ## Tools
 
-| Tool | Permission | Description |
-|---|---|---|
-| `fleet_summary` | read | Server count by health, power usage, stale agents and all servers with problems |
-| `list_servers` | read | Servers with health, power, inlet temperature, model and BMC address; filter by `health` or `query` |
-| `get_server` | read | Full record of one server: inventory, firmware, network, chassis, problems, Kubernetes node |
-| `get_sensors` | read | Live sensor readings with thresholds; filter by `type` or `problemsOnly` |
-| `get_events` | read | Newest System Event Log entries; `limit` and `query` |
-| `list_actions` | read | Recent power actions, optionally for one server |
-| `get_action` | read | Status of one power action |
-| `power_action` | operate | Request a power action; `name`, `action` and `reason` are required |
+| Tool | Description |
+|---|---|
+| `fleet_summary` | Server count by health, power usage, stale agents and all servers with problems |
+| `list_servers` | Servers with health, power, inlet temperature, model and BMC address; filter by `health` or `query` |
+| `get_server` | Full record of one server: inventory, firmware, network, chassis, problems, Kubernetes node |
+| `get_sensors` | Live sensor readings with thresholds; filter by `type` or `problemsOnly` |
+| `get_events` | Newest System Event Log entries; `limit` and `query` |
+| `list_actions` | Recent power actions, optionally for one server |
+| `get_action` | Status of one power action |
+| `power_action` | Request a power action; `name`, `action` and `reason` are required |
 
 Read-only tools carry `readOnlyHint`. `power_action` carries `destructiveHint`, so clients ask for
 confirmation before calling it. The server records the caller's identity in `requestedBy` and
@@ -28,8 +28,8 @@ The `diagnose_server` prompt guides an agent through a hardware investigation of
 ## Authentication
 
 With `auth.mode=none` the endpoint is open. With `auth.mode=oidc` every request needs a bearer
-token: an OIDC ID token from the configured issuer, or a Kubernetes token (see
-[authentication.md](authentication.md)). Unauthenticated requests receive `401` with a
+token: an OIDC ID token from the configured issuer, or the token of a ServiceAccount in the
+kube-bmc namespace (see [authentication.md](authentication.md)). Unauthenticated requests receive `401` with a
 `WWW-Authenticate` header that points to the OAuth protected resource metadata at
 `/.well-known/oauth-protected-resource` (RFC 9728).
 
@@ -56,14 +56,12 @@ Generic configuration (`mcp.json`):
 }
 ```
 
-A ServiceAccount token bound to `kube-bmc-viewer` gives an agent read-only access:
+A ServiceAccount token for an agent:
 
 ```bash
 kubectl -n kube-bmc-system create serviceaccount mcp-agent
-kubectl create clusterrolebinding mcp-agent-kube-bmc-viewer \
-  --clusterrole=kube-bmc-viewer --serviceaccount=kube-bmc-system:mcp-agent
 export KUBE_BMC_TOKEN=$(kubectl -n kube-bmc-system create token mcp-agent --duration=24h)
 ```
 
-Bind `kube-bmc-operator` only to agents that are allowed to power servers on and off, and keep
-`server.powerActions.enabled` off unless power control is required.
+Every authenticated client can call `power_action`. Keep `server.powerActions.enabled` off unless
+power control is required, and review agent requests in the action history.

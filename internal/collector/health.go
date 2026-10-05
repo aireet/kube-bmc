@@ -46,6 +46,9 @@ func Evaluate(s *Snapshot) (bmcv1.Health, bmcv1.SensorSummary, []bmcv1.Problem) 
 	if s.Chassis.IntrusionActive {
 		add(bmcv1.HealthWarning, "chassis", "Chassis intrusion detected")
 	}
+	if n := loginFailures(s.Events); n >= loginFailureThreshold {
+		add(bmcv1.HealthWarning, "security", fmt.Sprintf("%d failed BMC logins among the newest %d SEL entries", n, len(s.Events)))
+	}
 	if s.SELInfo.UsedPercent >= 90 {
 		add(bmcv1.HealthWarning, "sel", fmt.Sprintf("System Event Log is %d%% full; new hardware events may be dropped", s.SELInfo.UsedPercent))
 	}
@@ -60,6 +63,20 @@ func Evaluate(s *Snapshot) (bmcv1.Health, bmcv1.SensorSummary, []bmcv1.Problem) 
 		health = problems[0].Severity
 	}
 	return health, sum, problems
+}
+
+// loginFailureThreshold is the number of failed BMC logins in the retained SEL entries
+// that is reported as a problem.
+const loginFailureThreshold = 10
+
+func loginFailures(events []ipmi.Event) int {
+	n := 0
+	for _, e := range events {
+		if e.Event == "Invalid username or password" {
+			n++
+		}
+	}
+	return n
 }
 
 func describe(s ipmi.Sensor) string {

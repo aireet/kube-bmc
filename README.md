@@ -53,17 +53,17 @@ Features:
 - **Power control** (`On`, `GracefulShutdown`, `GracefulRestart`, `ForceRestart`, `PowerCycle`,
   `ForceOff`) over Redfish or IPMI-over-LAN. Every request is a `BMCAction` object, which serves
   as the audit record. Disabled by default.
-- **Three interfaces with one permission model**: the web dashboard, the `kubectl bmc` plugin
-  and an MCP endpoint for AI agents. All of them are authorized with Kubernetes RBAC.
-- **Authentication** with OpenID Connect for the dashboard, and OIDC or Kubernetes bearer tokens
-  for API and MCP clients.
+- **Three interfaces**: the web dashboard, the `kubectl bmc` plugin and an MCP endpoint for AI
+  agents. Power actions from all of them are recorded with the requester's identity.
+- **Authentication** with OpenID Connect for the dashboard, and OIDC or ServiceAccount bearer
+  tokens for API and MCP clients.
 - **Prometheus metrics** for every sensor, power draw, health and SEL usage.
 
 ## Installation
 
 Requirements:
 
-- Kubernetes 1.30 or later (the chart uses a ValidatingAdmissionPolicy).
+- Kubernetes 1.28 or later.
 - Nodes with a BMC and the IPMI kernel modules loaded (`ipmi_si`, `ipmi_devintf`), so that
   `/dev/ipmi0` exists. Nodes without a BMC can be excluded with `agent.nodeSelector`.
 
@@ -111,7 +111,7 @@ The agent keeps the load on the API server and etcd low:
 - Liveness is reported by renewing a small `coordination.k8s.io` Lease per node, as kubelet does
   for nodes, instead of rewriting the `BMC` status.
 - The `BMC` status is written only when health, problems, conditions or inventory change, when a
-  reading leaves its deadband (power ±10% or 50 W, inlet temperature ±3 °C, SEL usage ±5 points),
+  reading leaves its deadband (power ±20% or 100 W, inlet temperature ±3 °C, SEL usage ±5 points),
   or every 10 minutes. Sensor counts are refreshed with the readings. The agent patches against
   the last written object without reading it first.
 - New problems are reported immediately, but a problem is removed only after it has been clear
@@ -150,8 +150,8 @@ status:
 
 - The server executes each action once, out-of-band through Redfish or IPMI-over-LAN, so it
   works when the node is down. The outcome is also recorded as an Event on the `Node`.
-- A ValidatingAdmissionPolicy requires `spec.requestedBy` to equal the authenticated user. Only
-  the kube-bmc server, which authenticates dashboard and MCP users itself, may set another value.
+- `spec.requestedBy` is set to the authenticated user by the server (dashboard and MCP) and by
+  kubectl-bmc.
 - With `server.powerActions.enabled=false` (the default), actions are recorded and rejected.
 - Finished actions are deleted after `server.powerActions.ttl` (seven days by default).
 
@@ -169,27 +169,11 @@ helm upgrade kube-bmc oci://ghcr.io/aireet/charts/kube-bmc -n kube-bmc-system --
 The BMC address is discovered in-band. To override it, or to use per-server credentials or IPMI
 instead of Redfish, edit the `BMC` spec (see [examples/bmc-override.yaml](examples/bmc-override.yaml)).
 
-## Access control
+## Authentication
 
-The dashboard, the MCP endpoint and the kubectl plugin share one permission model based on
-Kubernetes RBAC. The chart creates two ClusterRoles:
-
-| Role | Grants |
-|---|---|
-| `kube-bmc-viewer` | Read BMCs, actions, live sensors and events. Aggregated into the built-in `view` role. |
-| `kube-bmc-operator` | `kube-bmc-viewer` plus creating `BMCAction` objects |
-
-```yaml
-# values.yaml
-rbac:
-  viewers:
-    - { kind: Group, name: "oidc:engineering", apiGroup: rbac.authorization.k8s.io }
-  operators:
-    - { kind: Group, name: "oidc:sre", apiGroup: rbac.authorization.k8s.io }
-```
-
-For dashboard and MCP users the server performs a SubjectAccessReview with the user's OIDC
-username and groups (prefixed with `oidc:` by default). See [docs/authentication.md](docs/authentication.md).
+kube-bmc is intended for the team that operates the cluster: it authenticates callers and records
+who requested each action, and every authenticated user has full access. Restrict who can sign in
+at the identity provider. See [docs/authentication.md](docs/authentication.md).
 
 ## MCP endpoint
 
@@ -202,11 +186,10 @@ claude mcp add --transport http kube-bmc https://kube-bmc.example.com/mcp \
   --header "Authorization: Bearer $TOKEN"
 ```
 
-`$TOKEN` is an OIDC ID token or a Kubernetes ServiceAccount token whose identity is bound to
-`kube-bmc-viewer` or `kube-bmc-operator`.
+`$TOKEN` is an OIDC ID token or the token of a ServiceAccount in the kube-bmc namespace
+(`kubectl -n kube-bmc-system create token <serviceaccount>`).
 
-`power_action` is annotated as destructive, requires a reason and is subject to the
-`kube-bmc-operator` role. See [docs/mcp.md](docs/mcp.md).
+`power_action` is annotated as destructive and requires a reason. See [docs/mcp.md](docs/mcp.md).
 
 ## kubectl plugin
 
@@ -248,8 +231,8 @@ Example alerting rules: [examples/prometheus-rules.yaml](examples/prometheus-rul
   `sel info`, `sel elist`, `dcmi power reading`).
 - The server runs as non-root with a read-only root filesystem and no capabilities. It reads
   Secrets only in its own namespace.
-- Without authentication (`auth.mode=none`) everyone who can reach the server can read BMC data
-  and, if power actions are enabled, request them.
+- Without authentication (`auth.mode=none`) everyone who can reach the server has full access,
+  including power actions when they are enabled. Use `auth.mode=oidc` for any exposed deployment.
 - IPMI-over-LAN has known weaknesses. Keep BMC networks isolated and prefer Redfish.
 
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
@@ -268,7 +251,6 @@ All chart values are documented in [charts/kube-bmc/values.yaml](charts/kube-bmc
 | `server.service.type` | `ClusterIP` | Service type of the dashboard |
 | `auth.mode` | `none` | `none` or `oidc` |
 | `auth.oidc.issuerURL` | `""` | OIDC issuer |
-| `rbac.viewers`, `rbac.operators` | `[]` | Subjects bound to the kube-bmc roles |
 | `metrics.podMonitor.enabled` | `false` | Create a PodMonitor for the agents |
 
 ## Development
@@ -292,7 +274,7 @@ make dev        # dashboard with hot reload against a port-forwarded server on :
 | `internal/agent` | BMC object lifecycle and agent HTTP API |
 | `internal/controller` | `BMCAction` execution |
 | `internal/oob` | Redfish and IPMI-over-LAN power control |
-| `internal/auth` | OIDC, bearer tokens and RBAC authorization |
+| `internal/auth` | OIDC sign-in and bearer token authentication |
 | `internal/server` | Dashboard API |
 | `internal/mcpserver` | MCP tools and prompts |
 | `internal/kubectl` | kubectl plugin commands |

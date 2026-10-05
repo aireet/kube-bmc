@@ -108,6 +108,14 @@ func (c *Client) LAN(ctx context.Context) (LAN, error) {
 		}
 		if lan.IPAddress != "" && lan.IPAddress != "0.0.0.0" {
 			lan.Channel = ch
+			if lan.Gateway == "" {
+				// Parameter 12: default gateway address. Read directly when `lan print`
+				// stopped before printing it.
+				raw, err := c.Runner.Run(ctx, "raw", "0x0c", "0x02", strconv.Itoa(ch), "0x0c", "0x00", "0x00")
+				if err == nil {
+					lan.Gateway, _ = parseRawIPv4(raw)
+				}
+			}
 			return lan, nil
 		}
 	}
@@ -138,6 +146,15 @@ func (c *Client) SELInfo(ctx context.Context) (SELInfo, error) {
 func (c *Client) SEL(ctx context.Context, n int) ([]Event, error) {
 	out, err := c.Runner.Run(ctx, c.withCache("sel", "elist", "last", strconv.Itoa(n))...)
 	return ParseSEL(out), err
+}
+
+// SELRecord returns the raw content of one SEL entry.
+func (c *Client) SELRecord(ctx context.Context, id string) (SELRecord, error) {
+	out, err := c.Runner.Run(ctx, c.withCache("sel", "get", "0x"+id)...)
+	if err != nil {
+		return SELRecord{}, err
+	}
+	return ParseSELRecord(out)
 }
 
 // Power returns the DCMI instantaneous power reading, or -1 when the BMC has no DCMI support.

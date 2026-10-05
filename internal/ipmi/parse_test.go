@@ -45,7 +45,8 @@ func TestParseLAN(t *testing.T) {
 func TestLANUsesPartialOutput(t *testing.T) {
 	c := NewClient(partialRunner{}, "")
 	lan, err := c.LAN(t.Context())
-	if err != nil || lan.IPAddress != "10.30.4.27" || lan.Channel != 1 || lan.MACAddress != "aa:bb:cc:00:22:33" {
+	if err != nil || lan.IPAddress != "10.30.4.27" || lan.Channel != 1 || lan.MACAddress != "aa:bb:cc:00:22:33" ||
+		lan.Gateway != "10.30.7.254" {
 		t.Fatalf("lan = %+v, err = %v", lan, err)
 	}
 }
@@ -53,6 +54,9 @@ func TestLANUsesPartialOutput(t *testing.T) {
 type partialRunner struct{}
 
 func (partialRunner) Run(_ context.Context, args ...string) ([]byte, error) {
+	if args[0] == "raw" {
+		return []byte(" 11 0a 1e 07 fe\n"), nil
+	}
 	if args[2] != "1" {
 		return nil, errors.New("Invalid channel: " + args[2])
 	}
@@ -176,6 +180,36 @@ func TestDiscreteSeverity(t *testing.T) {
 	} {
 		if got := DiscreteSeverity(reading); got != want {
 			t.Errorf("%q: got %s, want %s", reading, got, want)
+		}
+	}
+}
+
+func TestSELRecordDescribe(t *testing.T) {
+	r, err := ParseSELRecord(fixture(t, "sel_get.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Describe(); got != "Invalid username or password" {
+		t.Fatalf("describe = %q (record %+v)", got, r)
+	}
+	if got := (SELRecord{SensorType: "Session Audit", EventType: "Threshold", EventData: []byte{2}}).Describe(); got != "" {
+		t.Fatalf("threshold event described as %q", got)
+	}
+	if got := (SELRecord{SensorType: "Unknown", EventType: "Sensor-specific Discrete", EventData: []byte{2}}).Describe(); got != "" {
+		t.Fatalf("unknown sensor type described as %q", got)
+	}
+	if _, err := ParseSELRecord([]byte("SEL Record ID : 1\n")); err == nil {
+		t.Fatal("record without event data accepted")
+	}
+}
+
+func TestParseRawIPv4(t *testing.T) {
+	if ip, err := parseRawIPv4([]byte(" 11 0a d4 b3 fe\n")); err != nil || ip != "10.212.179.254" {
+		t.Fatalf("ip = %q, err = %v", ip, err)
+	}
+	for _, bad := range []string{"", " 11 0a", " 11 zz 00 00 00"} {
+		if _, err := parseRawIPv4([]byte(bad)); err == nil {
+			t.Errorf("%q accepted", bad)
 		}
 	}
 }
