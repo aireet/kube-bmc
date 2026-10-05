@@ -27,6 +27,22 @@ ipmitool sdr elist; ipmitool sensor; ipmitool sel info; ipmitool sel elist last 
 
 **Please remove serial numbers, MAC and IP addresses** before attaching it to an issue.
 
+## Developer Certificate of Origin
+
+Every commit must be signed off to certify the [Developer Certificate of Origin](https://developercertificate.org/):
+
+```bash
+git commit -s -m "area: change"
+```
+
+This appends `Signed-off-by: Your Name <you@example.com>` to the commit message. Pull requests
+with unsigned commits cannot be merged.
+
+## Design proposals
+
+Changes to the public API (resources, chart values, CLI flags, MCP tools) or to security-relevant
+behavior start with a proposal in [docs/proposals](docs/proposals).
+
 ## Pull requests
 
 - Keep changes focused; one topic per PR.

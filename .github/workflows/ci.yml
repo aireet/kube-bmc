@@ -23,6 +23,8 @@ jobs:
           git diff --exit-code
       - run: go vet ./...
       - run: make test
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
       - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
@@ -50,7 +52,7 @@ jobs:
       - run: make manifests
       - name: Validate rendered manifests
         run: |
-          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
           for values in "" "--set auth.mode=oidc --set auth.oidc.issuerURL=https://idp.example.com --set auth.oidc.existingSecret=oidc --set server.externalURL=https://kube-bmc.example.com --set server.powerActions.enabled=true --set server.credentials.existingSecret=bmc"; do
             helm template kube-bmc charts/kube-bmc -n kube-bmc-system $values \
               | $(go env GOPATH)/bin/kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.30.0

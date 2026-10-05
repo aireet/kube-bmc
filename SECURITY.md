@@ -8,6 +8,20 @@ Please **do not open a public issue**. Report it privately through
 [GitHub Security Advisories](https://github.com/aireet/kube-bmc/security/advisories/new).
 We will acknowledge within 3 business days and keep you updated until a fix is released.
 
+## Verifying releases
+
+Container images are signed with [Sigstore](https://www.sigstore.dev/) keyless signing and carry
+an SBOM and SLSA provenance attestation:
+
+```bash
+cosign verify ghcr.io/aireet/kube-bmc:v0.1.0 \
+  --certificate-identity-regexp 'https://github.com/aireet/kube-bmc/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Release artifacts (`install.yaml`, `kubectl-bmc_checksums.txt`) come with Sigstore bundles
+(`*.sigstore.json`), which can be checked with `cosign verify-blob --bundle`.
+
 ## Supported versions
 
 Security fixes are released for the latest minor version.

@@ -7,6 +7,8 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write      # keyless signing with Sigstore
+  attestations: write
 
 jobs:
   release:
@@ -33,6 +35,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
       - uses: docker/build-push-action@v6
+        id: build
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -40,6 +43,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: VERSION=${{ github.ref_name }}
+          sbom: true
+          provenance: mode=max
+      - uses: sigstore/cosign-installer@v4
+      - name: Sign the image
+        run: cosign sign --yes ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
       - name: Package and push the Helm chart
         run: |
           V=${GITHUB_REF_NAME#v}
@@ -50,6 +58,13 @@ jobs:
           make manifests
       - name: Build kubectl-bmc
         run: make plugins VERSION=${{ github.ref_name }}
+      - name: Sign release artifacts
+        run: |
+          cosign sign-blob --yes --bundle dist/kubectl-bmc_checksums.txt.sigstore.json dist/kubectl-bmc_checksums.txt
+          cosign sign-blob --yes --bundle dist/install.yaml.sigstore.json dist/install.yaml
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/kubectl-bmc_*.tar.gz
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
@@ -57,4 +72,5 @@ jobs:
             dist/install.yaml
             dist/kubectl-bmc_*.tar.gz
             dist/kubectl-bmc_checksums.txt
+            dist/*.sigstore.json
             kube-bmc-*.tgz

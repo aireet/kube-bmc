@@ -12,6 +12,7 @@
 <p align="center">
   <a href="https://github.com/aireet/kube-bmc/actions/workflows/ci.yml"><img src="https://github.com/aireet/kube-bmc/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://goreportcard.com/report/github.com/aireet/kube-bmc"><img src="https://goreportcard.com/badge/github.com/aireet/kube-bmc" alt="Go Report Card"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/aireet/kube-bmc"><img src="https://api.scorecard.dev/projects/github.com/aireet/kube-bmc/badge" alt="OpenSSF Scorecard"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
 </p>
 
@@ -105,9 +106,17 @@ commands on three schedules:
 | FRU, LAN configuration, firmware, thresholds | 10m | `ipmitool sensor` takes about ten seconds over KCS |
 | SEL entries | When `sel info` reports a change, at most every 5m | Reading the full SEL can take more than 30 seconds |
 
-The agent writes a summary into the `BMC` status. Changes to health, power state and inventory
-are written immediately, while changes that only affect readings are written at most every two minutes.
-Complete sensor lists and SEL entries are served by the agent on request and are not stored in etcd.
+The agent keeps the load on the API server and etcd low:
+
+- Liveness is reported by renewing a small `coordination.k8s.io` Lease per node, as kubelet does
+  for nodes, instead of rewriting the `BMC` status.
+- The `BMC` status is written only when health, problems, conditions or inventory change, when a
+  reading leaves its deadband (power ±10% or 50 W, inlet temperature ±3 °C, SEL usage ±5 points),
+  or every 10 minutes. The agent patches against the last written object without reading it first.
+- Complete sensor lists and SEL entries are served by the agent on request and never stored in etcd.
+
+In steady state each node causes about one status write per 10 minutes plus one Lease renewal per
+minute. `kube_bmc_status_writes_total{reason}` reports the write rate.
 
 **Server.** Serves the dashboard, the JSON API and the MCP endpoint, authenticates users, and
 runs the controller that executes `BMCAction` objects. It is stateless and reads through an
@@ -288,6 +297,14 @@ make dev        # dashboard with hot reload against a port-forwarded server on :
 | `charts/kube-bmc` | Helm chart |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Community
+
+- [Governance](GOVERNANCE.md) and [maintainers](MAINTAINERS.md)
+- [Design proposals](docs/proposals)
+- [Code of Conduct](CODE_OF_CONDUCT.md) (CNCF Code of Conduct)
+- [Security policy](SECURITY.md), including how to verify signed releases
+- [Adopters](ADOPTERS.md)
 
 ## License
 
