@@ -28,6 +28,9 @@ const (
 	wattsDeadbandMin   = 50
 	inletDeadband      = 3
 	selDeadband        = 5 // percentage points
+	// problemClearDelay is how long a problem must be absent before it is removed. New
+	// problems are reported immediately; the delay suppresses flapping around thresholds.
+	problemClearDelay = 5 * time.Minute
 )
 
 // statusWriter writes the BMC status. The agent is the only writer of the status, so it
@@ -41,6 +44,18 @@ type statusWriter struct {
 
 	obj       *bmcv1.BMC
 	lastWrite time.Time
+	// problemSeen records when each problem (by severity and source) was last observed.
+	problemSeen map[problemKey]seenProblem
+}
+
+type problemKey struct {
+	severity bmcv1.Health
+	source   string
+}
+
+type seenProblem struct {
+	problem bmcv1.Problem
+	at      time.Time
 }
 
 func (w *statusWriter) write(ctx context.Context, snap *collector.Snapshot, node func(context.Context) (*corev1.Node, error)) error {
@@ -52,11 +67,13 @@ func (w *statusWriter) write(ctx context.Context, snap *collector.Snapshot, node
 		w.obj = obj
 	}
 
+	now := time.Now()
 	next := collector.Status(snap)
+	next.Problems, next.Health = w.debounce(next.Problems, next.Health, now)
 	next.Conditions = slices.Clone(w.obj.Status.Conditions)
 	meta.SetStatusCondition(&next.Conditions, readyCondition(snap.Errors, w.obj.Generation))
 
-	reason := writeReason(w.obj.Status, next, w.lastWrite, time.Now(), w.refresh)
+	reason := writeReason(w.obj.Status, next, w.lastWrite, now, w.refresh)
 	if reason == "" {
 		return nil
 	}
@@ -75,6 +92,38 @@ func (w *statusWriter) write(ctx context.Context, snap *collector.Snapshot, node
 	statusWrites.WithLabelValues(reason).Inc()
 	w.log.Debug("status written", "reason", reason)
 	return nil
+}
+
+// debounce keeps problems that disappeared less than problemClearDelay ago and raises
+// health accordingly.
+func (w *statusWriter) debounce(current []bmcv1.Problem, health bmcv1.Health, now time.Time) ([]bmcv1.Problem, bmcv1.Health) {
+	if w.problemSeen == nil {
+		w.problemSeen = map[problemKey]seenProblem{}
+	}
+	for _, p := range current {
+		w.problemSeen[problemKey{p.Severity, p.Source}] = seenProblem{problem: p, at: now}
+	}
+	out := make([]bmcv1.Problem, 0, len(w.problemSeen))
+	for k, s := range w.problemSeen {
+		if now.Sub(s.at) > problemClearDelay {
+			delete(w.problemSeen, k)
+			continue
+		}
+		out = append(out, s.problem)
+		if s.problem.Severity.Rank() > health.Rank() {
+			health = s.problem.Severity
+		}
+	}
+	slices.SortFunc(out, func(a, b bmcv1.Problem) int {
+		if d := b.Severity.Rank() - a.Severity.Rank(); d != 0 {
+			return d
+		}
+		return strings.Compare(a.Source, b.Source)
+	})
+	if len(out) == 0 {
+		out = nil
+	}
+	return out, health
 }
 
 // writeReason returns why next must be written, or "" if the write can be skipped.
@@ -96,6 +145,7 @@ func writeReason(prev, next bmcv1.BMCStatus, lastWrite, now time.Time, refresh t
 func stable(s bmcv1.BMCStatus) bmcv1.BMCStatus {
 	s.PowerWatts, s.InletTemperature, s.LastUpdated, s.AgentVersion = nil, nil, nil, ""
 	s.SEL.Entries, s.SEL.LastAddTime = 0, ""
+	s.Sensors = bmcv1.SensorSummary{} // statistics; refreshed with the readings
 	s.SEL.UsedPercent = s.SEL.UsedPercent / selDeadband * selDeadband
 	s.Problems = slices.Clone(s.Problems)
 	for i := range s.Problems {

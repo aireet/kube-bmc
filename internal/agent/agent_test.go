@@ -217,6 +217,7 @@ func TestWriteReason(t *testing.T) {
 		"power state":            {mutate(func(s *bmcv1.BMCStatus) { s.PowerState = bmcv1.PowerOff }), recent, "change"},
 		"condition message only": {mutate(func(s *bmcv1.BMCStatus) { s.Conditions[0].Message = "other" }), recent, ""},
 		"condition status":       {mutate(func(s *bmcv1.BMCStatus) { s.Conditions[0].Status = metav1.ConditionFalse }), recent, "change"},
+		"sensor counts only":     {mutate(func(s *bmcv1.BMCStatus) { s.Sensors.NoReading++ }), recent, ""},
 		"refresh due":            {mutate(func(s *bmcv1.BMCStatus) { s.PowerWatts = ptr.To(int32(1010)) }), now.Add(-11 * time.Minute), "refresh"},
 	}
 	for name, tc := range cases {
@@ -226,6 +227,36 @@ func TestWriteReason(t *testing.T) {
 	}
 	if base.Problems[0].Message == "" {
 		t.Fatal("writeReason mutated its input")
+	}
+}
+
+func TestProblemHysteresis(t *testing.T) {
+	w := &statusWriter{}
+	t0 := time.Now()
+	fan := bmcv1.Problem{Severity: bmcv1.HealthCritical, Source: "FAN3", Message: "0 RPM"}
+	inlet := bmcv1.Problem{Severity: bmcv1.HealthWarning, Source: "Inlet_Temp", Message: "41 C"}
+
+	got, h := w.debounce([]bmcv1.Problem{inlet, fan}, bmcv1.HealthCritical, t0)
+	if len(got) != 2 || got[0].Source != "FAN3" || h != bmcv1.HealthCritical {
+		t.Fatalf("initial: %v %s", got, h)
+	}
+	// Inlet_Temp drops below its threshold: it is kept for problemClearDelay.
+	got, _ = w.debounce([]bmcv1.Problem{fan}, bmcv1.HealthCritical, t0.Add(time.Minute))
+	if len(got) != 2 {
+		t.Fatalf("problem removed before the clear delay: %v", got)
+	}
+	// All problems clear; health stays at the remembered severity until the delay passes.
+	got, h = w.debounce(nil, bmcv1.HealthOK, t0.Add(3*time.Minute))
+	if len(got) != 2 || h != bmcv1.HealthCritical {
+		t.Fatalf("within delay: %v %s", got, h)
+	}
+	got, h = w.debounce(nil, bmcv1.HealthOK, t0.Add(9*time.Minute))
+	if got != nil || h != bmcv1.HealthOK {
+		t.Fatalf("after delay: %v %s", got, h)
+	}
+	// A new problem is reported immediately.
+	if got, _ = w.debounce([]bmcv1.Problem{inlet}, bmcv1.HealthWarning, t0.Add(10*time.Minute)); len(got) != 1 {
+		t.Fatalf("new problem: %v", got)
 	}
 }
 

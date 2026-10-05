@@ -112,7 +112,10 @@ The agent keeps the load on the API server and etcd low:
   for nodes, instead of rewriting the `BMC` status.
 - The `BMC` status is written only when health, problems, conditions or inventory change, when a
   reading leaves its deadband (power ±10% or 50 W, inlet temperature ±3 °C, SEL usage ±5 points),
-  or every 10 minutes. The agent patches against the last written object without reading it first.
+  or every 10 minutes. Sensor counts are refreshed with the readings. The agent patches against
+  the last written object without reading it first.
+- New problems are reported immediately, but a problem is removed only after it has been clear
+  for 5 minutes, so sensors oscillating around a threshold do not cause repeated writes.
 - Complete sensor lists and SEL entries are served by the agent on request and never stored in etcd.
 
 In steady state each node causes about one status write per 10 minutes plus one Lease renewal per
