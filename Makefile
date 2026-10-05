@@ -56,7 +56,7 @@ plugins: ## Cross-compile kubectl-bmc archives into dist/.
 		os=$${p%/*}; arch=$${p#*/}; \
 		out=dist/kubectl-bmc_$${os}_$${arch}; mkdir -p $$out; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o $$out/kubectl-bmc ./cmd/kubectl-bmc || exit 1; \
-		cp LICENSE $$out/; tar -C $$out -czf $$out.tar.gz . && rm -rf $$out; \
+		cp LICENSE $$out/; tar -C $$out -czf $$out.tar.gz kubectl-bmc LICENSE && rm -rf $$out; \
 	done
 	@cd dist && sha256sum kubectl-bmc_*.tar.gz > kubectl-bmc_checksums.txt
 

@@ -5,13 +5,13 @@ server.
 
 ## Installation
 
-Download the archive for your platform from the
+Download the archive for your architecture (amd64 or arm64) from the
 [latest release](https://github.com/aireet/kube-bmc/releases/latest), verify it against
 `kubectl-bmc_checksums.txt` and place `kubectl-bmc` on your `PATH`:
 
 ```bash
 curl -fsSLO https://github.com/aireet/kube-bmc/releases/latest/download/kubectl-bmc_linux_amd64.tar.gz
-tar -xzf kubectl-bmc_linux_amd64.tar.gz kubectl-bmc
+tar -xzf kubectl-bmc_linux_amd64.tar.gz
 sudo install kubectl-bmc /usr/local/bin/
 kubectl bmc version
 ```
