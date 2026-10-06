@@ -288,8 +288,9 @@ func printArchives(w io.Writer, items []corev1.ConfigMap) {
 	fmt.Fprintln(t, "NAME\tAGE\tENTRIES\tSIZE\tREQUESTED-BY\tREASON")
 	for _, cm := range items {
 		a := cm.Annotations
+		size := len(cm.BinaryData[controller.SELArchiveKey]) + len(cm.Data["sel.txt"])
 		fmt.Fprintf(t, "%s\t%s\t%s\t%d KiB\t%s\t%s\n", cm.Name, age(cm.CreationTimestamp.Time),
-			orDash(a["bmc.kube-bmc.io/entries"]), (len(cm.BinaryData[controller.SELArchiveKey])+1023)/1024,
+			orDash(a["bmc.kube-bmc.io/entries"]), (size+1023)/1024,
 			orDash(a["bmc.kube-bmc.io/requested-by"]), orDash(a["bmc.kube-bmc.io/reason"]))
 	}
 	_ = t.Flush()

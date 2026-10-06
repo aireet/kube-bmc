@@ -15,6 +15,13 @@ All notable changes to this project are documented in this file. The format foll
 - Grafana dashboard (`charts/kube-bmc/dashboards/kube-bmc.json`, optional ConfigMap for the
   dashboard sidecar with `grafana.dashboard.enabled`).
 - Dashboard dialog "AI agents" with the MCP endpoint and client configuration.
+
+### Fixed
+- `kubectl bmc sel-archives` shows and prints archives created by v0.3.0, which are not compressed.
+
+## [0.3.1] - 2026-10-06
+
+### Added
 - `kubectl bmc sel-archives NAME [--show ARCHIVE]` lists and prints saved System Event Logs.
 
 ### Changed

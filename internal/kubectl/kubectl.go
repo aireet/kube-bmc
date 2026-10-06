@@ -487,6 +487,10 @@ func (o *options) selArchivesCmd() *cobra.Command {
 }
 
 func printArchive(w io.Writer, cm *corev1.ConfigMap) error {
+	if text, ok := cm.Data["sel.txt"]; ok { // uncompressed archives created by v0.3.0
+		_, err := io.WriteString(w, text)
+		return err
+	}
 	zr, err := gzip.NewReader(bytes.NewReader(cm.BinaryData[controller.SELArchiveKey]))
 	if err != nil {
 		return fmt.Errorf("archive %s: %w", cm.Name, err)

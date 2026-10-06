@@ -276,6 +276,17 @@ func TestSELArchives(t *testing.T) {
 	if !strings.Contains(h.out.String(), "Session Audit #0xff") {
 		t.Fatalf("show:\n%s", h.out)
 	}
+	legacy := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "sel-server131-20261005-090000", Namespace: "kube-bmc-system",
+			Labels: map[string]string{controller.SELArchiveLabel: "true", controller.BMCLabel: "server131"}},
+		Data: map[string]string{"sel.txt": "1 | 10/01/26 | 08:00:00 UTC | Power Unit #0x66 | Power off/down | Asserted\n"},
+	}
+	if err := h.client.Create(context.Background(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.run(t, "sel-archives", "server131", "--show", legacy.Name); err != nil || !strings.Contains(h.out.String(), "Power Unit") {
+		t.Fatalf("legacy archive: %v\n%s", err, h.out)
+	}
 	if err := h.run(t, "sel-archives", "server131", "--show", "missing"); err == nil {
 		t.Fatal("unknown archive accepted")
 	}
