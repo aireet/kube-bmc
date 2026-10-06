@@ -363,8 +363,9 @@ spec:
                       - Unknown
                       type: string
                     source:
-                      description: 'Source is what raised the problem: a sensor name,
-                        "chassis" or "sel".'
+                      description: |-
+                        Source is what raised the problem: a sensor name, "chassis", "intrusion", "sel"
+                        or "security". A source raises at most one problem at a time.
                       type: string
                   required:
                   - message
