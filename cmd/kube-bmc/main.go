@@ -389,9 +389,15 @@ func runServer(ctx context.Context, args []string) error {
 		Handler: server.New(server.Options{
 			Backend: backend,
 			Config:  server.Config{Version: version, Actions: *actions, ClusterName: *clusterName, Auth: authn.Mode()},
-			UI:      web.FS(), Authn: authn, MCP: mcpHandler, ProtectedResourceMetadata: prm, Log: log,
+			UI:      web.FS(), Authn: authn, MCP: http.MaxBytesHandler(mcpHandler, 1<<20), ProtectedResourceMetadata: prm, Log: log,
 		}).Handler(),
+		// Requests are small JSON documents; the slowest response, live data relayed from
+		// an agent, is bounded by the agent client timeout.
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      time.Minute,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	errc := make(chan error, 2)

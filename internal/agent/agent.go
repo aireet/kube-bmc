@@ -75,7 +75,15 @@ func (a *Agent) SELCleared() {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
-	srv := &http.Server{Addr: a.opts.Listen, Handler: a.handler(), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{
+		Addr:              a.opts.Listen,
+		Handler:           a.handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    16 << 10,
+	}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
