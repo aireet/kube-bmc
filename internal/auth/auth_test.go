@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,12 +19,6 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
-	authenticationv1 "k8s.io/api/authentication/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 // provider is an OpenID Connect provider that signs in a fixed user without a login form.
@@ -217,41 +212,30 @@ func TestBearerOIDCToken(t *testing.T) {
 }
 
 func TestBearerKubernetesToken(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	reviews := 0
-	c := fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
-		Create: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.CreateOption) error {
-			tr := obj.(*authenticationv1.TokenReview)
-			reviews++
-			switch tr.Spec.Token {
-			case "sa-token":
-				tr.Status.Authenticated = true
-				tr.Status.User = authenticationv1.UserInfo{Username: "system:serviceaccount:kube-bmc-system:agent", Groups: []string{"system:serviceaccounts"}}
-			case "workload-token":
-				tr.Status.Authenticated = true
-				tr.Status.User = authenticationv1.UserInfo{Username: "system:serviceaccount:default:app"}
-			}
-			return nil
-		},
-	}).Build()
+	sa, workload := saToken("kube-bmc-system", "agent", 0), saToken("default", "app", 0)
+	c, reviews := reviewClient(t, map[string]string{
+		sa:       "system:serviceaccount:kube-bmc-system:agent",
+		workload: "system:serviceaccount:default:app",
+	})
 	p := newProvider(t)
-	a := newAuthenticator(t, p, &TokenReviewer{Client: c, Namespace: "kube-bmc-system", TTL: time.Minute})
+	a := newAuthenticator(t, p, NewTokenReviewer(c, "kube-bmc-system", TokenReviewOptions{}))
 
 	for range 2 {
-		id, _, err := a.VerifyBearer(context.Background(), "sa-token")
+		id, _, err := a.VerifyBearer(context.Background(), sa)
 		if err != nil || id.Username != "system:serviceaccount:kube-bmc-system:agent" || id.Method != MethodKubernetes {
 			t.Fatalf("id = %+v, err = %v", id, err)
 		}
 	}
-	if reviews != 1 {
-		t.Fatalf("token reviewed %d times; want cached", reviews)
+	if reviews.Load() != 1 {
+		t.Fatalf("token reviewed %d times; want cached", reviews.Load())
 	}
-	if _, _, err := a.VerifyBearer(context.Background(), "bogus"); err == nil {
-		t.Fatal("invalid token accepted")
+	for name, token := range map[string]string{"opaque": "bogus", "other namespace": workload} {
+		if _, _, err := a.VerifyBearer(context.Background(), token); !errors.Is(err, ErrUnauthenticated) {
+			t.Errorf("%s: err = %v", name, err)
+		}
 	}
-	if _, _, err := a.VerifyBearer(context.Background(), "workload-token"); err == nil {
-		t.Fatal("token of a ServiceAccount outside the kube-bmc namespace accepted")
+	if reviews.Load() != 1 {
+		t.Fatalf("tokens of other namespaces must be rejected without a review (%d reviews)", reviews.Load())
 	}
 }
 

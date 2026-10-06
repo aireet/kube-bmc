@@ -335,7 +335,7 @@ func runServer(ctx context.Context, args []string) error {
 		authOpts.SessionSecret = secret
 		authOpts.Passwords = &auth.Passwords{Reader: mgr.GetClient(), Namespace: *namespace, Secret: *usersSecret}
 		if *kubeTokens {
-			authOpts.Tokens = &auth.TokenReviewer{Client: mgr.GetClient(), Namespace: *namespace, TTL: time.Minute}
+			authOpts.Tokens = auth.NewTokenReviewer(mgr.GetClient(), *namespace, auth.TokenReviewOptions{})
 		}
 	case "oidc":
 		if base == "" {
@@ -356,7 +356,7 @@ func runServer(ctx context.Context, args []string) error {
 		}
 		authOpts.OIDC, authOpts.SessionSecret = o, secret
 		if *kubeTokens {
-			authOpts.Tokens = &auth.TokenReviewer{Client: mgr.GetClient(), Namespace: *namespace, TTL: time.Minute}
+			authOpts.Tokens = auth.NewTokenReviewer(mgr.GetClient(), *namespace, auth.TokenReviewOptions{})
 		}
 		prm = mcpauth.ProtectedResourceMetadataHandler(&oauthex.ProtectedResourceMetadata{
 			Resource:               base + "/mcp",

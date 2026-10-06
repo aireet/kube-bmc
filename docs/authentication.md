@@ -234,6 +234,14 @@ Tokens of ServiceAccounts in other namespaces are rejected, so workloads in the 
 their own tokens to access kube-bmc. Delete the ServiceAccount to revoke access. Set
 `auth.kubernetesTokens: false` to disable these tokens.
 
+kube-bmc verifies these tokens with the TokenReview API and caches the result for one minute,
+so a deleted ServiceAccount loses access within a minute. Because bearer tokens come from
+unauthenticated clients, the work they can cause is bounded: only JWTs whose subject is a
+ServiceAccount of the kube-bmc namespace are sent for review, at most 20 reviews per second, and
+concurrent requests with the same token share one review. When a token cannot be checked, for
+example because the API server is unreachable, the response is `503 Service Unavailable` with
+`Retry-After`, not `401`, so clients retry instead of discarding a valid token.
+
 In `oidc` mode, ID tokens issued by the provider are also accepted when their audience is the
 client ID or one of `auth.oidc.extraAudiences`.
 

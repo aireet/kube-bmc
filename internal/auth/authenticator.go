@@ -26,8 +26,14 @@ const (
 	loginTTL      = 10 * time.Minute
 )
 
-// ErrUnauthenticated is returned when a request carries no valid credentials.
-var ErrUnauthenticated = errors.New("authentication required")
+var (
+	// ErrUnauthenticated is returned when a request carries no valid credentials.
+	ErrUnauthenticated = errors.New("authentication required")
+	// ErrUnavailable is returned when credentials could not be checked, for example
+	// because the Kubernetes API server is unreachable or reviews are rate limited. The
+	// client should retry; its credentials may be valid.
+	ErrUnavailable = errors.New("authentication temporarily unavailable")
+)
 
 // Options configures an Authenticator.
 type Options struct {
@@ -116,20 +122,25 @@ func (a *Authenticator) Identify(r *http.Request) (Identity, error) {
 // provider are verified locally; all others are sent to the TokenReview API.
 // The returned time is the token expiry, if known.
 func (a *Authenticator) VerifyBearer(ctx context.Context, token string) (Identity, time.Time, error) {
-	if o := a.opts.OIDC; o != nil && unverifiedIssuer(token) == o.Issuer() {
-		id, tok, err := o.Verify(ctx, token)
-		if err != nil {
-			return Identity{}, time.Time{}, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
+	if o := a.opts.OIDC; o != nil {
+		if c, _ := unverifiedClaims(token); c.Issuer == o.Issuer() {
+			id, tok, err := o.Verify(ctx, token)
+			if err != nil {
+				return Identity{}, time.Time{}, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
+			}
+			id.Method = MethodOIDCToken
+			return id, tok.Expiry, nil
 		}
-		id.Method = MethodOIDCToken
-		return id, tok.Expiry, nil
 	}
 	if a.opts.Tokens != nil {
 		id, err := a.opts.Tokens.Review(ctx, token)
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrUnavailable):
+			return Identity{}, time.Time{}, err
+		case err != nil:
 			return Identity{}, time.Time{}, fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 		}
-		return id, time.Now().Add(a.opts.Tokens.TTL), nil
+		return id, time.Now().Add(a.opts.Tokens.TTL()), nil
 	}
 	return Identity{}, time.Time{}, ErrUnauthenticated
 }
@@ -138,7 +149,10 @@ func (a *Authenticator) VerifyBearer(ctx context.Context, token string) (Identit
 func (a *Authenticator) MCPVerifier() mcpauth.TokenVerifier {
 	return func(ctx context.Context, token string, _ *http.Request) (*mcpauth.TokenInfo, error) {
 		id, exp, err := a.VerifyBearer(ctx, token)
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrUnavailable):
+			return nil, err // a server error, not an invalid token
+		case err != nil:
 			return nil, fmt.Errorf("%w: %w", mcpauth.ErrInvalidToken, err)
 		}
 		return &mcpauth.TokenInfo{UserID: id.Username, Expiration: exp, Extra: map[string]any{"identity": id}}, nil
@@ -149,11 +163,14 @@ func (a *Authenticator) MCPVerifier() mcpauth.TokenVerifier {
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id, err := a.Identify(r)
-		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
+		switch {
+		case errors.Is(err, ErrUnavailable):
+			w.Header().Set("Retry-After", "1")
+			writeAuthError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		case err != nil:
 			w.Header().Set("WWW-Authenticate", `Bearer realm="kube-bmc"`)
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			writeAuthError(w, http.StatusUnauthorized, err.Error())
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(WithIdentity(r.Context(), id)))
@@ -330,21 +347,28 @@ func safeRedirect(rd string) string {
 	return rd
 }
 
-// unverifiedIssuer reads the iss claim of a JWT without verifying it, to choose a verifier.
-func unverifiedIssuer(token string) string {
+// claims are the JWT claims used to choose how a token is verified.
+type claims struct {
+	Issuer  string `json:"iss"`
+	Subject string `json:"sub"`
+}
+
+// unverifiedClaims decodes the claims of a JWT without verifying its signature. The
+// result only selects a verifier; it must not be trusted.
+func unverifiedClaims(token string) (claims, bool) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return ""
+		return claims{}, false
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return ""
+		return claims{}, false
 	}
-	var claims struct {
-		Issuer string `json:"iss"`
+	var c claims
+	if json.Unmarshal(payload, &c) != nil {
+		return claims{}, false
 	}
-	_ = json.Unmarshal(payload, &claims)
-	return claims.Issuer
+	return c, true
 }
 
 func randomString() string {
