@@ -24,7 +24,8 @@
   <a href="#architecture">Architecture</a> ·
   <a href="docs/authentication.md">Authentication</a> ·
   <a href="docs/mcp.md">MCP</a> ·
-  <a href="docs/kubectl.md">kubectl plugin</a>
+  <a href="docs/kubectl.md">kubectl plugin</a> ·
+  <a href="#libraries">Go libraries</a>
 </p>
 
 ![Dashboard](docs/images/fleet.png)
@@ -386,11 +387,10 @@ make dev        # dashboard with hot reload against a port-forwarded server on :
 | `api/v1alpha1` | `BMC` and `BMCAction` types |
 | `cmd/kube-bmc` | Agent and server binary |
 | `cmd/kubectl-bmc` | kubectl plugin |
-| `internal/ipmi` | ipmitool client and parsers, tested against recorded output of real BMCs |
+| `ipmi`, `redfish`, `bmc`, `hardware` | Reusable libraries, see [Libraries](#libraries) |
 | `internal/collector` | Polling, health evaluation and metrics |
 | `internal/agent` | BMC object lifecycle and agent HTTP API |
 | `internal/controller` | `BMCAction` execution |
-| `internal/oob` | Redfish and IPMI-over-LAN power control |
 | `internal/auth` | Password and OIDC sign-in, bearer token authentication |
 | `internal/server` | Dashboard API |
 | `internal/mcpserver` | MCP tools and prompts |
@@ -399,6 +399,31 @@ make dev        # dashboard with hot reload against a port-forwarded server on :
 | `charts/kube-bmc` | Helm chart |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Libraries
+
+The hardware access of kube-bmc is available as Go packages without Kubernetes
+dependencies:
+
+| Package | Purpose |
+|---|---|
+| [`ipmi`](https://pkg.go.dev/github.com/aireet/kube-bmc/ipmi) | Sensors, event log, FRU, LAN, chassis and power control of a BMC, in-band or over the network |
+| [`ipmi/ipmitest`](https://pkg.go.dev/github.com/aireet/kube-bmc/ipmi/ipmitest) | Recorded output of a real server, for tests without hardware |
+| [`redfish`](https://pkg.go.dev/github.com/aireet/kube-bmc/redfish) | Power state and reset over Redfish |
+| [`bmc`](https://pkg.go.dev/github.com/aireet/kube-bmc/bmc) | Power actions over Redfish or IPMI behind one function |
+| [`hardware`](https://pkg.go.dev/github.com/aireet/kube-bmc/hardware) | CPU, memory, GPU and PCIe slot inventory of a Linux host |
+
+```go
+c := ipmi.New(ipmi.Tool{}) // the BMC of this host, through /dev/ipmi0
+sensors, err := c.Sensors(ctx)
+
+err = bmc.Power(ctx, bmc.Endpoint{Address: "10.0.0.7", Username: "admin", Password: pw}, bmc.PowerCycle)
+
+inv, err := hardware.Read(ctx)
+```
+
+The packages follow the version of kube-bmc. Until 1.0, minor releases may change their API;
+changes are listed in the [changelog](CHANGELOG.md).
 
 ## Community
 

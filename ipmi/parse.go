@@ -52,9 +52,10 @@ func first(kv map[string]string, keys ...string) string {
 	return ""
 }
 
-func ParseMCInfo(out []byte) MCInfo {
+// parseController parses `ipmitool mc info`.
+func parseController(out []byte) Controller {
 	kv := parseKV(out)
-	return MCInfo{
+	return Controller{
 		FirmwareVersion:  kv["Firmware Revision"],
 		IPMIVersion:      kv["IPMI Version"],
 		ManufacturerID:   kv["Manufacturer ID"],
@@ -63,11 +64,13 @@ func ParseMCInfo(out []byte) MCInfo {
 	}
 }
 
-func ParseGUID(out []byte) string {
+// parseGUID parses `ipmitool mc guid`.
+func parseGUID(out []byte) string {
 	return first(parseKV(out), "System GUID", "GUID")
 }
 
-func ParseLAN(out []byte) LAN {
+// parseLAN parses `ipmitool lan print`.
+func parseLAN(out []byte) LAN {
 	kv := parseKV(out)
 	return LAN{
 		IPAddress:  kv["IP Address"],
@@ -79,7 +82,8 @@ func ParseLAN(out []byte) LAN {
 	}
 }
 
-func ParseFRU(out []byte) FRU {
+// parseFRU parses `ipmitool fru print`.
+func parseFRU(out []byte) FRU {
 	kv := parseKV(out)
 	return FRU{
 		Manufacturer:  first(kv, "Product Manufacturer", "Board Mfg"),
@@ -96,7 +100,8 @@ func ParseFRU(out []byte) FRU {
 
 var chassisFaults = []string{"Power Overload", "Main Power Fault", "Power Control Fault", "Drive Fault", "Cooling/Fan Fault"}
 
-func ParseChassis(out []byte) Chassis {
+// parseChassis parses `ipmitool chassis status`.
+func parseChassis(out []byte) Chassis {
 	kv := parseKV(out)
 	c := Chassis{
 		PowerOn:            kv["System Power"] == "on",
@@ -112,7 +117,8 @@ func ParseChassis(out []byte) Chassis {
 	return c
 }
 
-func ParseSELInfo(out []byte) SELInfo {
+// parseSELInfo parses `ipmitool sel info`.
+func parseSELInfo(out []byte) SELInfo {
 	kv := parseKV(out)
 	n, _ := strconv.Atoi(kv["Entries"])
 	pct, _ := strconv.Atoi(strings.TrimSuffix(kv["Percent Used"], "%"))
@@ -121,33 +127,33 @@ func ParseSELInfo(out []byte) SELInfo {
 
 var dcmiWatts = regexp.MustCompile(`Instantaneous power reading:\s*(\d+)\s*Watts`)
 
-// ParseDCMIPower returns the instantaneous power draw in watts, or -1 when unavailable.
-func ParseDCMIPower(out []byte) int {
+// parsePowerReading parses `ipmitool dcmi power reading`.
+func parsePowerReading(out []byte) (int, bool) {
 	m := dcmiWatts.FindSubmatch(out)
 	if m == nil {
-		return -1
+		return 0, false
 	}
-	w, _ := strconv.Atoi(string(m[1]))
-	return w
+	w, err := strconv.Atoi(string(m[1]))
+	return w, err == nil
 }
 
-// sensorType maps an ipmitool unit to a coarse sensor type.
-func sensorType(unit string) string {
+// sensorType maps an ipmitool unit to a sensor type.
+func sensorType(unit string) SensorType {
 	switch strings.ToLower(unit) {
 	case "degrees c", "degrees f":
-		return "temperature"
+		return Temperature
 	case "volts":
-		return "voltage"
+		return Voltage
 	case "rpm":
-		return "fan"
+		return Fan
 	case "watts":
-		return "power"
+		return Power
 	case "amps":
-		return "current"
+		return Current
 	case "percent":
-		return "utilization"
+		return Utilization
 	}
-	return "discrete"
+	return Discrete
 }
 
 // severityOf classifies an ipmitool status code (sdr: ok/ns/lnc/ucr/…, sensor: ok/na/nc/cr/nr).
@@ -176,8 +182,8 @@ var discreteRules = []struct {
 	{[]string{"predictive failure", "redundancy lost", "redundancy degraded", "log full", "correctable ecc", "degraded", "almost full"}, SeverityWarning},
 }
 
-// DiscreteSeverity classifies the state text of a discrete sensor.
-func DiscreteSeverity(reading string) Severity {
+// discreteSeverity classifies the state text of a discrete sensor.
+func discreteSeverity(reading string) Severity {
 	r := strings.ToLower(reading)
 	// "Predictive failure" would otherwise match the critical rule for "failure".
 	if strings.Contains(r, "predictive failure") {
@@ -203,8 +209,8 @@ func splitReading(s string) (float64, string, bool) {
 	return v, unit, true
 }
 
-// ParseSDR parses `ipmitool sdr elist`: name | id | status | entity | reading.
-func ParseSDR(out []byte) []Sensor {
+// parseSDR parses `ipmitool sdr elist`: name | id | status | entity | reading.
+func parseSDR(out []byte) []Sensor {
 	var res []Sensor
 	for _, f := range rows(out) {
 		if len(f) < 5 {
@@ -215,8 +221,8 @@ func ParseSDR(out []byte) []Sensor {
 			s.Value, s.Unit = &v, unit
 		}
 		s.Type = sensorType(s.Unit)
-		if s.Type == "discrete" && s.Severity == SeverityOK {
-			s.Severity = DiscreteSeverity(s.Reading)
+		if s.Type == Discrete && s.Severity == SeverityOK {
+			s.Severity = discreteSeverity(s.Reading)
 		}
 		res = append(res, s)
 	}
@@ -231,11 +237,11 @@ func optFloat(s string) *float64 {
 	return &v
 }
 
-// ParseThresholds parses `ipmitool sensor`: name | value | unit | status | lnr | lcr | lnc | unc | ucr | unr.
-func ParseThresholds(out []byte) map[string]Thresholds {
+// parseThresholds parses `ipmitool sensor`: name | value | unit | status | lnr | lcr | lnc | unc | ucr | unr.
+func parseThresholds(out []byte) map[string]Thresholds {
 	res := map[string]Thresholds{}
 	for _, f := range rows(out) {
-		if len(f) < 10 || sensorType(f[2]) == "discrete" {
+		if len(f) < 10 || sensorType(f[2]) == Discrete {
 			continue
 		}
 		t := Thresholds{
@@ -253,8 +259,8 @@ func ParseThresholds(out []byte) map[string]Thresholds {
 	return res
 }
 
-// ParseSEL parses `ipmitool sel elist`: id | date | time | sensor | event | direction [| detail].
-func ParseSEL(out []byte) []Event {
+// parseEvents parses `ipmitool sel elist`: id | date | time | sensor | event | direction [| detail].
+func parseEvents(out []byte) []Event {
 	var res []Event
 	for _, f := range rows(out) {
 		if len(f) < 5 {

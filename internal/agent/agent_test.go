@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -24,27 +23,9 @@ import (
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/collector"
-	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/ipmi"
+	"github.com/aireet/kube-bmc/ipmi/ipmitest"
 )
-
-// fixtureRunner answers ipmitool commands with recorded output from a real server.
-type fixtureRunner struct{}
-
-var fixtures = map[string]string{
-	"mc info": "mc_info.txt", "mc guid": "mc_guid.txt", "lan print 1": "lan_print.txt", "fru print 0": "fru_print.txt",
-	"chassis status": "chassis_status.txt", "sel info": "sel_info.txt", "dcmi power reading": "dcmi_power_reading.txt",
-	"sdr elist": "sdr_elist.txt", "sensor": "sensor.txt", "sel elist last 100": "sel_elist.txt",
-}
-
-func (fixtureRunner) Run(_ context.Context, args ...string) ([]byte, error) {
-	if len(args) > 1 && args[0] == "-S" {
-		args = args[2:]
-	}
-	if args[0] == "sdr" && args[1] == "dump" {
-		return nil, os.WriteFile(args[2], []byte("sdr"), 0o600)
-	}
-	return os.ReadFile("../ipmi/testdata/" + fixtures[strings.Join(args, " ")])
-}
 
 type env struct {
 	k8s     client.Client
@@ -76,8 +57,8 @@ func newEnv(t *testing.T) *env {
 		}).Build()
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	e.col = collector.New("gpu-01", ipmi.NewClient(fixtureRunner{}, t.TempDir()), collector.Options{
-		Interval: time.Hour, InventoryInterval: time.Hour, SELMinInterval: 0, SELEntries: 100,
+	e.col = collector.New("gpu-01", ipmi.New(ipmitest.Recorded()), collector.Options{
+		CacheDir: t.TempDir(), Interval: time.Hour, InventoryInterval: time.Hour, SELMinInterval: 0, SELEntries: 100,
 		CommandTimeout: 5 * time.Second, SELTimeout: 5 * time.Second,
 	}, log)
 	e.agent = New(e.k8s, e.col, Options{

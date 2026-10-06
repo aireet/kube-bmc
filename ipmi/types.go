@@ -1,9 +1,7 @@
-// Package ipmi talks to the local BMC through ipmitool over the in-band (KCS/SSIF) interface
-// and turns its text output into typed values.
 package ipmi
 
-// MCInfo is the output of `ipmitool mc info`.
-type MCInfo struct {
+// Controller describes the BMC itself, as reported by `ipmitool mc info`.
+type Controller struct {
 	FirmwareVersion  string `json:"firmwareVersion"`
 	IPMIVersion      string `json:"ipmiVersion"`
 	ManufacturerID   string `json:"manufacturerID"`
@@ -11,7 +9,7 @@ type MCInfo struct {
 	ProductID        string `json:"productID"`
 }
 
-// LAN is the output of `ipmitool lan print`.
+// LAN is the network configuration of the BMC's management port.
 type LAN struct {
 	Channel    int    `json:"channel"`
 	IPAddress  string `json:"ipAddress"`
@@ -22,7 +20,7 @@ type LAN struct {
 	VLAN       string `json:"vlan"`
 }
 
-// FRU is the output of `ipmitool fru print 0`.
+// FRU is the field-replaceable unit inventory of the system board and chassis.
 type FRU struct {
 	Manufacturer  string `json:"manufacturer"`
 	Product       string `json:"product"`
@@ -35,7 +33,7 @@ type FRU struct {
 	ChassisSerial string `json:"chassisSerial"`
 }
 
-// Chassis is the output of `ipmitool chassis status`.
+// Chassis is the chassis power and fault state.
 type Chassis struct {
 	PowerOn            bool     `json:"powerOn"`
 	PowerRestorePolicy string   `json:"powerRestorePolicy"`
@@ -44,10 +42,11 @@ type Chassis struct {
 	Faults             []string `json:"faults"`
 }
 
-// SELInfo is the output of `ipmitool sel info`.
+// SELInfo describes the System Event Log.
 type SELInfo struct {
-	Entries     int    `json:"entries"`
-	UsedPercent int    `json:"usedPercent"`
+	Entries     int `json:"entries"`
+	UsedPercent int `json:"usedPercent"`
+	// LastAddTime changes whenever an entry is added, so it detects new events cheaply.
 	LastAddTime string `json:"lastAddTime"`
 }
 
@@ -61,7 +60,21 @@ const (
 	SeverityNoReading Severity = "noreading"
 )
 
-// Thresholds of an analog sensor; nil means "not set".
+// SensorType is the kind of quantity a sensor measures, derived from its unit.
+type SensorType string
+
+const (
+	Temperature SensorType = "temperature"
+	Voltage     SensorType = "voltage"
+	Fan         SensorType = "fan"
+	Power       SensorType = "power"
+	Current     SensorType = "current"
+	Utilization SensorType = "utilization"
+	// Discrete sensors report a state, such as "Presence detected", instead of a value.
+	Discrete SensorType = "discrete"
+)
+
+// Thresholds of an analog sensor. A nil field is not set on the BMC.
 type Thresholds struct {
 	LowerNonRecoverable *float64 `json:"lnr,omitempty"`
 	LowerCritical       *float64 `json:"lcr,omitempty"`
@@ -71,27 +84,30 @@ type Thresholds struct {
 	UpperNonRecoverable *float64 `json:"unr,omitempty"`
 }
 
-// Sensor is one SDR entry.
+// Sensor is one sensor of the Sensor Data Repository (SDR).
 type Sensor struct {
-	Name string `json:"name"`
-	// Type is derived from the unit: temperature, voltage, fan, power, current, utilization or discrete.
-	Type     string   `json:"type"`
-	Value    *float64 `json:"value,omitempty"`
-	Unit     string   `json:"unit,omitempty"`
-	Reading  string   `json:"reading"`
+	Name  string     `json:"name"`
+	Type  SensorType `json:"type"`
+	Value *float64   `json:"value,omitempty"`
+	Unit  string     `json:"unit,omitempty"`
+	// Reading is the reading as text, e.g. "46 degrees C" or "Presence detected".
+	Reading string `json:"reading"`
+	// Status is the ipmitool status code, e.g. "ok", "ucr" or "ns".
 	Status   string   `json:"status"`
 	Severity Severity `json:"severity"`
 	Entity   string   `json:"entity,omitempty"`
-	// Thresholds are filled from `ipmitool sensor`, which is slow, so they refresh less often.
+	// Thresholds is not set by Client.Sensors; see Client.Thresholds.
 	Thresholds *Thresholds `json:"thresholds,omitempty"`
 }
 
-// Event is one System Event Log record.
+// Event is one System Event Log entry.
 type Event struct {
 	ID        string `json:"id"`
 	Timestamp string `json:"timestamp"`
 	Sensor    string `json:"sensor"`
-	Event     string `json:"event"`
-	Asserted  bool   `json:"asserted"`
-	Detail    string `json:"detail,omitempty"`
+	// Event describes what happened. ipmitool leaves it empty for some sensor-specific
+	// events; Client.EventRecord and EventRecord.Describe recover the description.
+	Event    string `json:"event"`
+	Asserted bool   `json:"asserted"`
+	Detail   string `json:"detail,omitempty"`
 }

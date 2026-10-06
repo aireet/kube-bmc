@@ -143,6 +143,7 @@ MCP 工具包括 `fleet_summary`、`list_servers`、`get_server`、`get_sensors`
 - [MCP 接口](docs/mcp.md)
 - [kubectl 插件](docs/kubectl.md)
 - [Grafana 面板](docs/grafana.md)
+- [Go 库](README.md#libraries)：`ipmi`、`redfish`、`bmc`、`hardware` 可脱离 Kubernetes 单独使用
 - [英文 README](README.md)：指标、配置与开发
 
 ## 许可证

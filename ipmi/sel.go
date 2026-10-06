@@ -6,21 +6,21 @@ import (
 	"strings"
 )
 
-// SELRecord is the raw content of one SEL entry as reported by `ipmitool sel get`.
-type SELRecord struct {
+// EventRecord is the raw content of a System Event Log entry.
+type EventRecord struct {
 	SensorType string
 	EventType  string
 	EventData  []byte
 }
 
-// ParseSELRecord parses `ipmitool sel get <id>`.
-func ParseSELRecord(out []byte) (SELRecord, error) {
+// parseEventRecord parses `ipmitool sel get <id>`.
+func parseEventRecord(out []byte) (EventRecord, error) {
 	kv := parseKV(out)
 	data, err := hex.DecodeString(kv["Event Data"])
 	if err != nil || len(data) == 0 {
-		return SELRecord{}, fmt.Errorf("sel record has no event data")
+		return EventRecord{}, fmt.Errorf("SEL record has no event data")
 	}
-	return SELRecord{SensorType: kv["Sensor Type"], EventType: kv["Event Type"], EventData: data}, nil
+	return EventRecord{SensorType: kv["Sensor Type"], EventType: kv["Event Type"], EventData: data}, nil
 }
 
 // sensorSpecificOffsets lists event offsets of sensor-specific discrete sensors (IPMI 2.0,
@@ -51,9 +51,9 @@ var sensorSpecificOffsets = map[string][]string{
 	},
 }
 
-// Describe returns a description of a sensor-specific event, or "" if it is unknown.
+// Describe returns the description of a sensor-specific event, or "" if it is unknown.
 // The event offset is the low nibble of the first event data byte.
-func (r SELRecord) Describe() string {
+func (r EventRecord) Describe() string {
 	if !strings.Contains(r.EventType, "Sensor-specific") {
 		return ""
 	}

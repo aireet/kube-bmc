@@ -16,8 +16,8 @@ import (
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/auth"
-	"github.com/aireet/kube-bmc/internal/ipmi"
 	"github.com/aireet/kube-bmc/internal/server"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
 // Options configures the MCP server.
@@ -232,9 +232,9 @@ func (t *tools) getServer(ctx context.Context, req *mcp.CallToolRequest, in name
 }
 
 type sensorsIn struct {
-	Name         string `json:"name" jsonschema:"server (Kubernetes node) name"`
-	Type         string `json:"type,omitempty" jsonschema:"only sensors of this type: temperature, fan, voltage, power, current, utilization or discrete"`
-	ProblemsOnly bool   `json:"problemsOnly,omitempty" jsonschema:"only sensors in warning or critical state"`
+	Name         string          `json:"name" jsonschema:"server (Kubernetes node) name"`
+	Type         ipmi.SensorType `json:"type,omitempty" jsonschema:"only sensors of this type: temperature, fan, voltage, power, current, utilization or discrete"`
+	ProblemsOnly bool            `json:"problemsOnly,omitempty" jsonschema:"only sensors in warning or critical state"`
 }
 
 type SensorList struct {

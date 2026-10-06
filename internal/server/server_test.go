@@ -29,14 +29,14 @@ import (
 	"github.com/aireet/kube-bmc/internal/auth"
 	"github.com/aireet/kube-bmc/internal/collector"
 	"github.com/aireet/kube-bmc/internal/controller"
-	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
 const ns = "kube-bmc-system"
 
-// newTestBackend returns a Kube backend over a fake client holding one node, its BMC
+// newTestBackend returns a Cluster backend over a fake client holding one node, its BMC
 // and its agent pod, whose snapshot API is served by an httptest server.
-func newTestBackend(t *testing.T, extra ...client.Object) (*Kube, client.Client) {
+func newTestBackend(t *testing.T, extra ...client.Object) (*Cluster, client.Client) {
 	t.Helper()
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		v := 55.0
@@ -63,9 +63,9 @@ func newTestBackend(t *testing.T, extra ...client.Object) (*Kube, client.Client)
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning, PodIP: host},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append([]client.Object{b, node, pod}, extra...)...).WithStatusSubresource(&bmcv1.BMC{}).Build()
-	return NewKube(c, KubeOptions{
+	return NewCluster(c, ClusterOptions{
 		Namespace: ns, AgentSelector: labels.SelectorFromSet(labels.Set{"app": "agent"}), AgentPort: agentPort,
-		Credentials: controller.Credentials{Reader: c, Namespace: ns}, StaleAfter: time.Hour,
+		Endpoints: controller.Endpoints{Reader: c, Namespace: ns}, StaleAfter: time.Hour,
 	}), c
 }
 

@@ -1,35 +1,41 @@
 package collector
 
 import (
-	"os"
 	"testing"
 	"time"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
-	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/ipmi"
+	"github.com/aireet/kube-bmc/ipmi/ipmitest"
 )
 
-func read(t *testing.T, name string) []byte {
-	t.Helper()
-	b, err := os.ReadFile("../ipmi/testdata/" + name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
-// realSnapshot is built from the anonymized output of a real 8-GPU server.
+// realSnapshot is read from the recorded output of a real 8-GPU server with five failed
+// fans.
 func realSnapshot(t *testing.T) *Snapshot {
-	return &Snapshot{
-		MC:         ipmi.ParseMCInfo(read(t, "mc_info.txt")),
-		LAN:        ipmi.ParseLAN(read(t, "lan_print.txt")),
-		FRU:        ipmi.ParseFRU(read(t, "fru_print.txt")),
-		Chassis:    ipmi.ParseChassis(read(t, "chassis_status.txt")),
-		SELInfo:    ipmi.ParseSELInfo(read(t, "sel_info.txt")),
-		PowerWatts: ipmi.ParseDCMIPower(read(t, "dcmi_power_reading.txt")),
-		Sensors:    ipmi.ParseSDR(read(t, "sdr_elist.txt")),
-		Errors:     map[string]string{},
+	t.Helper()
+	c, ctx := ipmi.New(ipmitest.Recorded()), t.Context()
+	s := &Snapshot{Errors: map[string]string{}}
+	var err error
+	must := func(e error) {
+		if e != nil {
+			t.Fatal(e)
+		}
 	}
+	s.MC, err = c.Controller(ctx)
+	must(err)
+	s.LAN, err = c.LAN(ctx)
+	must(err)
+	s.FRU, err = c.FRU(ctx)
+	must(err)
+	s.Chassis, err = c.Chassis(ctx)
+	must(err)
+	s.SELInfo, err = c.SELInfo(ctx)
+	must(err)
+	s.PowerWatts, err = c.PowerReading(ctx)
+	must(err)
+	s.Sensors, err = c.Sensors(ctx)
+	must(err)
+	return s
 }
 
 func TestEvaluateRealServer(t *testing.T) {
@@ -60,7 +66,7 @@ func TestEvaluateOneProblemPerSource(t *testing.T) {
 	}
 	unc := ipmi.Sensor{Name: "FAN1", Type: "fan", Reading: "900 RPM", Status: "lnc", Severity: ipmi.SeverityWarning}
 	s := &Snapshot{
-		MC:      ipmi.MCInfo{FirmwareVersion: "1"},
+		MC:      ipmi.Controller{FirmwareVersion: "1"},
 		Sensors: []ipmi.Sensor{unc, lnr("FAN1"), lnr("FAN2")},
 		Chassis: ipmi.Chassis{Faults: []string{"Cooling/Fan Fault", "Power Overload"}, IntrusionActive: true},
 	}
@@ -85,7 +91,7 @@ func TestEvaluateOneProblemPerSource(t *testing.T) {
 
 func TestEvaluateHealthy(t *testing.T) {
 	v := 25.0
-	s := &Snapshot{MC: ipmi.MCInfo{FirmwareVersion: "1"}, Sensors: []ipmi.Sensor{{Name: "Inlet", Type: "temperature", Value: &v, Severity: ipmi.SeverityOK}}}
+	s := &Snapshot{MC: ipmi.Controller{FirmwareVersion: "1"}, Sensors: []ipmi.Sensor{{Name: "Inlet", Type: "temperature", Value: &v, Severity: ipmi.SeverityOK}}}
 	if h, _, p := Evaluate(s); h != bmcv1.HealthOK || len(p) != 0 {
 		t.Fatalf("health = %s, problems = %v", h, p)
 	}
@@ -111,7 +117,7 @@ func TestStatus(t *testing.T) {
 }
 
 func TestLoginFailures(t *testing.T) {
-	s := &Snapshot{MC: ipmi.MCInfo{FirmwareVersion: "1"}}
+	s := &Snapshot{MC: ipmi.Controller{FirmwareVersion: "1"}}
 	for range 12 {
 		s.Events = append(s.Events, ipmi.Event{Sensor: "Session Audit #0xff", Event: "Invalid username or password"})
 	}

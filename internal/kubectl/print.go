@@ -1,6 +1,7 @@
 package kubectl
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"slices"
@@ -15,7 +16,7 @@ import (
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/collector"
 	"github.com/aireet/kube-bmc/internal/controller"
-	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
 const (
@@ -186,7 +187,7 @@ func describe(w io.Writer, b *bmcv1.BMC, actions []bmcv1.BMCAction, color bool) 
 }
 
 type sensorFilter struct {
-	Type     string
+	Type     ipmi.SensorType
 	Problems bool
 	All      bool
 }
@@ -210,7 +211,7 @@ func printSensors(w io.Writer, sensors []ipmi.Sensor, f sensorFilter, color bool
 			return d
 		}
 		if a.Type != b.Type {
-			return strings.Compare(a.Type, b.Type)
+			return cmp.Compare(a.Type, b.Type)
 		}
 		return strings.Compare(a.Name, b.Name)
 	})

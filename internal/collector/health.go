@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
-	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
 var statusText = map[string]string{
@@ -99,7 +99,7 @@ var inletName = regexp.MustCompile(`(?i)inlet|ambient|intake|front.?panel`)
 // InletTemperature picks the most plausible air-inlet temperature sensor.
 func InletTemperature(sensors []ipmi.Sensor) (float64, bool) {
 	for _, s := range sensors {
-		if s.Type == "temperature" && s.Value != nil && inletName.MatchString(s.Name) &&
+		if s.Type == ipmi.Temperature && s.Value != nil && inletName.MatchString(s.Name) &&
 			!strings.Contains(strings.ToLower(s.Name), "cpu") {
 			return *s.Value, true
 		}

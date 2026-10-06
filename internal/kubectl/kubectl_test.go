@@ -20,7 +20,7 @@ import (
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/collector"
 	"github.com/aireet/kube-bmc/internal/controller"
-	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
 func fixtureBMC(name string, h bmcv1.Health) *bmcv1.BMC {

@@ -18,7 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
-	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
 // ipmiRecorder records ipmitool calls, the action phase stored at the time of each call
@@ -54,7 +54,7 @@ func inBand(t *testing.T, enabled bool, objs ...client.Object) (*InBandReconcile
 	t.Helper()
 	f := newFixture(t, true, objs...)
 	rec := &ipmiRecorder{c: f.c, fail: map[string]error{}}
-	return &InBandReconciler{Client: f.c, Node: "gpu-01", IPMI: ipmi.NewClient(rec, ""), Namespace: ns, SELArchives: 3,
+	return &InBandReconciler{Client: f.c, Node: "gpu-01", IPMI: ipmi.New(rec), Namespace: ns, SELArchives: 3,
 		Enabled: enabled, Timeout: time.Minute, Now: func() time.Time { return f.now }}, rec, f
 }
 
@@ -70,7 +70,7 @@ func TestInBandExecutes(t *testing.T) {
 		bmcv1.ActionGracefulShutdown: "soft", bmcv1.ActionForceOff: "off",
 		bmcv1.ActionForceRestart: "reset", bmcv1.ActionPowerCycle: "cycle",
 	} {
-		r, rec, f := inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", act))
+		r, rec, f := inBand(t, true, newBMC("gpu-01"), action("a1", "gpu-01", act))
 		reconcileInBand(t, r)
 		if len(rec.calls) != 1 || rec.calls[0] != "chassis power "+verb {
 			t.Fatalf("%s: calls = %v", act, rec.calls)
@@ -93,7 +93,7 @@ func TestInBandExecutes(t *testing.T) {
 }
 
 func TestInBandReportsFailure(t *testing.T) {
-	r, rec, f := inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionForceRestart))
+	r, rec, f := inBand(t, true, newBMC("gpu-01"), action("a1", "gpu-01", bmcv1.ActionForceRestart))
 	rec.fail["chassis power reset"] = errors.New("ipmitool chassis power reset: Could not open device at /dev/ipmi0")
 	reconcileInBand(t, r)
 	if a := f.action("a1"); a.Status.Phase != bmcv1.PhaseFailed || !strings.Contains(a.Status.Message, "/dev/ipmi0") {
@@ -115,7 +115,7 @@ func TestInBandIgnores(t *testing.T) {
 		"already claimed": {true, claimed},
 	}
 	for name, tc := range cases {
-		r, rec, f := inBand(t, tc.enabled, bmc("gpu-01"), tc.obj)
+		r, rec, f := inBand(t, tc.enabled, newBMC("gpu-01"), tc.obj)
 		reconcileInBand(t, r)
 		if len(rec.calls) != 0 {
 			t.Errorf("%s: executed %v", name, rec.calls)
@@ -127,7 +127,7 @@ func TestInBandIgnores(t *testing.T) {
 }
 
 func TestIdentify(t *testing.T) {
-	r, rec, f := inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionIdentifyOn))
+	r, rec, f := inBand(t, true, newBMC("gpu-01"), action("a1", "gpu-01", bmcv1.ActionIdentifyOn))
 	reconcileInBand(t, r)
 	if strings.Join(rec.calls, ",") != "chassis identify force" {
 		t.Fatalf("calls = %v", rec.calls)
@@ -137,7 +137,7 @@ func TestIdentify(t *testing.T) {
 	}
 
 	// BMCs without indefinite identify fall back to the maximum interval.
-	r, rec, f = inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionIdentifyOn))
+	r, rec, f = inBand(t, true, newBMC("gpu-01"), action("a1", "gpu-01", bmcv1.ActionIdentifyOn))
 	rec.fail["chassis identify force"] = errors.New("Invalid data field in request")
 	reconcileInBand(t, r)
 	if strings.Join(rec.calls, ",") != "chassis identify force,chassis identify 255" {
@@ -147,7 +147,7 @@ func TestIdentify(t *testing.T) {
 		t.Fatalf("status = %+v", a.Status)
 	}
 
-	r, rec, f = inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionIdentifyOff))
+	r, rec, f = inBand(t, true, newBMC("gpu-01"), action("a1", "gpu-01", bmcv1.ActionIdentifyOff))
 	reconcileInBand(t, r)
 	if strings.Join(rec.calls, ",") != "chassis identify 0" || f.action("a1").Status.Phase != bmcv1.PhaseSucceeded {
 		t.Fatalf("calls = %v, status = %+v", rec.calls, f.action("a1").Status)
@@ -157,7 +157,7 @@ func TestIdentify(t *testing.T) {
 func TestClearSELArchivesFirst(t *testing.T) {
 	a := action("a1", "gpu-01", bmcv1.ActionClearSEL)
 	a.UID = "action-uid"
-	r, rec, f := inBand(t, true, bmc("gpu-01"), a)
+	r, rec, f := inBand(t, true, newBMC("gpu-01"), a)
 	rec.sel = "237b | 10/04/26 | 17:01:03 UTC | Session Audit #0xff |  | Asserted\n237c | 10/04/26 | 17:01:03 UTC | Session Audit #0xff |  | Asserted\n"
 	cleared := 0
 	r.OnSELCleared = func() { cleared++ }
@@ -194,7 +194,7 @@ func TestClearSELArchivesFirst(t *testing.T) {
 }
 
 func TestClearSELKeepsLogWhenReadFails(t *testing.T) {
-	r, rec, f := inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionClearSEL))
+	r, rec, f := inBand(t, true, newBMC("gpu-01"), action("a1", "gpu-01", bmcv1.ActionClearSEL))
 	rec.fail["sel elist"] = errors.New("Could not open device at /dev/ipmi0")
 	r.OnSELCleared = func() { t.Fatal("OnSELCleared called although the log was not cleared") }
 	reconcileInBand(t, r)
@@ -212,7 +212,7 @@ func TestClearSELKeepsNewestArchives(t *testing.T) {
 			Name: "sel-" + node + "-" + ts, Namespace: ns, Labels: map[string]string{SELArchiveLabel: "true", BMCLabel: node},
 		}}
 	}
-	r, _, f := inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionClearSEL),
+	r, _, f := inBand(t, true, newBMC("gpu-01"), action("a1", "gpu-01", bmcv1.ActionClearSEL),
 		archive("gpu-01", "20261001-080000"), archive("gpu-01", "20261002-080000"), archive("gpu-01", "20261003-080000"),
 		archive("gpu-02", "20260901-080000"))
 	reconcileInBand(t, r)

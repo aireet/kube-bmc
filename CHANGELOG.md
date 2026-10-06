@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Changed
+- The rejection message of an out-of-band action states why out-of-band access is not
+  available.
+
 ### Fixed
 - Data race on the SDR cache path between the collector and the action controller, which
   share one IPMI client.
@@ -29,6 +33,12 @@ All notable changes to this project are documented in this file. The format foll
   1 MiB limit on MCP request bodies.
 
 ### Added
+- Reusable Go libraries without Kubernetes dependencies: `ipmi` (BMC access through
+  ipmitool, in-band or over LAN), `ipmi/ipmitest` (recorded output of a real server for
+  tests), `redfish` (power over Redfish), `bmc` (power actions over Redfish or IPMI) and
+  `hardware` (host CPU, memory, GPU and PCIe slot inventory). They replace
+  `internal/ipmi`, `internal/oob` and `internal/hostinv`; the JSON served by agents is
+  unchanged, so agents and servers of different versions interoperate during an upgrade.
 - `status.deadline` on BMCAction.
 - UI unit tests (`npm test`), run by `make test` and CI.
 

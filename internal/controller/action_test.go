@@ -18,14 +18,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
-	"github.com/aireet/kube-bmc/internal/oob"
+	"github.com/aireet/kube-bmc/bmc"
 )
 
 const ns = "kube-bmc-system"
 
 type powerCall struct {
-	target oob.Target
-	action bmcv1.ActionType
+	endpoint bmc.Endpoint
+	action   bmc.PowerAction
 }
 
 type fixture struct {
@@ -46,10 +46,10 @@ func newFixture(t *testing.T, enabled bool, objs ...client.Object) *fixture {
 	f.c = fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).
 		WithStatusSubresource(&bmcv1.BMCAction{}, &bmcv1.BMC{}).Build()
 	f.r = &ActionReconciler{
-		Client:      f.c,
-		Credentials: Credentials{Reader: f.c, Namespace: ns, Default: "bmc-credentials"},
-		Power: func(_ context.Context, tg oob.Target, a bmcv1.ActionType) error {
-			f.calls = append(f.calls, powerCall{tg, a})
+		Client:    f.c,
+		Endpoints: Endpoints{Reader: f.c, Namespace: ns, DefaultSecret: "bmc-credentials"},
+		Power: func(_ context.Context, e bmc.Endpoint, a bmc.PowerAction) error {
+			f.calls = append(f.calls, powerCall{e, a})
 			return f.err
 		},
 		Enabled: enabled,
@@ -78,7 +78,7 @@ func (f *fixture) action(name string) *bmcv1.BMCAction {
 	return a
 }
 
-func bmc(name string) *bmcv1.BMC {
+func newBMC(name string) *bmcv1.BMC {
 	b := &bmcv1.BMC{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: bmcv1.BMCSpec{NodeName: name}}
 	b.Status.Network.IPAddress = "10.0.0.7"
 	b.Status.PowerState = bmcv1.PowerOn
@@ -98,7 +98,7 @@ var secret = &corev1.Secret{
 }
 
 func TestActionSucceeds(t *testing.T) {
-	f := newFixture(t, true, bmc("gpu-01"), secret, action("a1", "gpu-01", bmcv1.ActionForceRestart))
+	f := newFixture(t, true, newBMC("gpu-01"), secret, action("a1", "gpu-01", bmcv1.ActionForceRestart))
 	f.reconcile("a1")
 
 	a := f.action("a1")
@@ -106,8 +106,8 @@ func TestActionSucceeds(t *testing.T) {
 		a.Status.Deadline == nil || !a.Status.Deadline.Equal(&metav1.Time{Time: f.now.Add(f.r.Timeout)}) {
 		t.Fatalf("status = %+v", a.Status)
 	}
-	if len(f.calls) != 1 || f.calls[0].action != bmcv1.ActionForceRestart || f.calls[0].target.Address != "10.0.0.7" ||
-		f.calls[0].target.Creds.Username != "admin" {
+	if len(f.calls) != 1 || f.calls[0].action != bmc.ForceRestart || f.calls[0].endpoint.Address != "10.0.0.7" ||
+		f.calls[0].endpoint.Username != "admin" {
 		t.Fatalf("calls = %+v", f.calls)
 	}
 
@@ -124,7 +124,7 @@ func TestActionSucceeds(t *testing.T) {
 }
 
 func TestActionFails(t *testing.T) {
-	f := newFixture(t, true, bmc("gpu-01"), secret, action("a1", "gpu-01", bmcv1.ActionOn))
+	f := newFixture(t, true, newBMC("gpu-01"), secret, action("a1", "gpu-01", bmcv1.ActionOn))
 	f.err = errors.New("connection refused")
 	f.reconcile("a1")
 	if a := f.action("a1"); a.Status.Phase != bmcv1.PhaseFailed || a.Status.Message != "connection refused" {
@@ -138,16 +138,16 @@ func TestActionRejected(t *testing.T) {
 		objs    []client.Object
 		want    string
 	}{
-		"disabled":       {false, []client.Object{bmc("gpu-01"), secret}, "actions are disabled on this kube-bmc server"},
+		"disabled":       {false, []client.Object{newBMC("gpu-01"), secret}, "actions are disabled on this kube-bmc server"},
 		"unknown bmc":    {true, []client.Object{secret}, "BMC gpu-01 not found"},
-		"no credentials": {true, []client.Object{bmc("gpu-01")}, `the node agent on gpu-01 did not execute the action within 0s and out-of-band access is not configured`},
+		"no credentials": {true, []client.Object{newBMC("gpu-01")}, `the node agent on gpu-01 did not execute the action within 0s and out-of-band access is not configured`},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, tc.enabled, append(tc.objs, action("a1", "gpu-01", bmcv1.ActionForceOff))...)
 			f.reconcile("a1")
 			a := f.action("a1")
-			if a.Status.Phase != bmcv1.PhaseRejected || a.Status.Message != tc.want {
+			if a.Status.Phase != bmcv1.PhaseRejected || !strings.HasPrefix(a.Status.Message, tc.want) {
 				t.Fatalf("status = %+v", a.Status)
 			}
 			if len(f.calls) != 0 {
@@ -179,7 +179,7 @@ func TestRunningActionWatchdog(t *testing.T) {
 			a := action("a1", "gpu-01", bmcv1.ActionClearSEL)
 			a.Status = tc.status
 			a.Status.Phase = bmcv1.PhaseRunning
-			f := newFixture(t, true, bmc("gpu-01"), secret, a)
+			f := newFixture(t, true, newBMC("gpu-01"), secret, a)
 			res := f.reconcile("a1")
 			got := f.action("a1")
 			if failed := got.Status.Phase == bmcv1.PhaseFailed; failed != tc.failed || res.RequeueAfter != tc.requeueIn {
@@ -211,7 +211,7 @@ func TestFinishedActionExpires(t *testing.T) {
 
 func TestInBandActionIsLeftToTheAgent(t *testing.T) {
 	a := action("a1", "gpu-01", bmcv1.ActionForceRestart)
-	f := newFixture(t, true, bmc("gpu-01"), secret, a)
+	f := newFixture(t, true, newBMC("gpu-01"), secret, a)
 	f.r.ClaimTimeout = 30 * time.Second
 	created := f.action("a1").CreationTimestamp.Time
 	f.now = created.Add(10 * time.Second)
@@ -231,19 +231,19 @@ func TestInBandActionIsLeftToTheAgent(t *testing.T) {
 }
 
 func TestUnclaimedInBandActionWithoutCredentials(t *testing.T) {
-	f := newFixture(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionPowerCycle))
+	f := newFixture(t, true, newBMC("gpu-01"), action("a1", "gpu-01", bmcv1.ActionPowerCycle))
 	f.r.ClaimTimeout = 30 * time.Second
 	f.now = f.action("a1").CreationTimestamp.Add(time.Minute)
 	f.reconcile("a1")
 	a := f.action("a1")
-	want := "the node agent on gpu-01 did not execute the action within 30s and out-of-band access is not configured"
-	if a.Status.Phase != bmcv1.PhaseRejected || a.Status.Message != want {
+	want := "the node agent on gpu-01 did not execute the action within 30s and out-of-band access is not configured: credentials secret"
+	if a.Status.Phase != bmcv1.PhaseRejected || !strings.HasPrefix(a.Status.Message, want) {
 		t.Fatalf("status = %+v", a.Status)
 	}
 }
 
 func TestUnclaimedNonPowerActionIsRejected(t *testing.T) {
-	f := newFixture(t, true, bmc("gpu-01"), secret, action("a1", "gpu-01", bmcv1.ActionClearSEL))
+	f := newFixture(t, true, newBMC("gpu-01"), secret, action("a1", "gpu-01", bmcv1.ActionClearSEL))
 	f.r.ClaimTimeout = 30 * time.Second
 	f.now = f.action("a1").CreationTimestamp.Add(time.Minute)
 	f.reconcile("a1")
@@ -254,7 +254,7 @@ func TestUnclaimedNonPowerActionIsRejected(t *testing.T) {
 }
 
 func TestPowerOnNeedsOutOfBand(t *testing.T) {
-	f := newFixture(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionOn))
+	f := newFixture(t, true, newBMC("gpu-01"), action("a1", "gpu-01", bmcv1.ActionOn))
 	f.r.ClaimTimeout = time.Hour // On is never left to the agent
 	f.reconcile("a1")
 	a := f.action("a1")

@@ -1,4 +1,4 @@
-package hostinv
+package hardware
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func fixture(t *testing.T, name string) []byte {
 	return b
 }
 
-func sysfs(t *testing.T) Resolver {
+func sysfs(t *testing.T) func(string) (string, error) {
 	paths := map[string]string{}
 	for _, line := range strings.Split(string(fixture(t, "sysfs_paths.txt")), "\n") {
 		if addr, path, ok := strings.Cut(line, " "); ok {
@@ -34,21 +34,21 @@ func sysfs(t *testing.T) Resolver {
 	}
 }
 
-func TestParseProcessors(t *testing.T) {
-	c := ParseProcessors(fixture(t, "dmidecode_processor.txt"))
+func TestProcessors(t *testing.T) {
+	c := parseProcessors(fixture(t, "dmidecode_processor.txt"))
 	if c.Model != "Intel Xeon Platinum 8468V" || c.Sockets != 2 || c.Cores != 96 || c.Threads != 192 {
 		t.Fatalf("cpu = %+v", c)
 	}
 }
 
-func TestParseMemory(t *testing.T) {
-	m := ParseMemory(fixture(t, "dmidecode_memory.txt"))
+func TestMemory(t *testing.T) {
+	m := parseMemory(fixture(t, "dmidecode_memory.txt"))
 	if m.Slots != 32 || m.Modules != 8 || m.TotalGiB != 512 || m.ModuleGiB != 64 || m.Type != "DDR5" || m.SpeedMTs == 0 {
 		t.Fatalf("memory = %+v", m)
 	}
 }
 
-func TestCollect(t *testing.T) {
+func TestInventory(t *testing.T) {
 	files := map[string]string{
 		"dmidecode -t processor": "dmidecode_processor.txt", "dmidecode -t memory": "dmidecode_memory.txt",
 		"dmidecode -t slot": "dmidecode_slot.txt", "lspci -mm -nn -D": "lspci.txt",
@@ -56,7 +56,7 @@ func TestCollect(t *testing.T) {
 	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		return fixture(t, files[name+" "+strings.Join(args, " ")]), nil
 	}
-	inv, err := Collect(context.Background(), run, sysfs(t))
+	inv, err := Host{Run: run, DevicePath: sysfs(t)}.Inventory(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,14 +90,14 @@ func TestCollect(t *testing.T) {
 	}
 }
 
-func TestCollectPartial(t *testing.T) {
+func TestPartialInventory(t *testing.T) {
 	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name == "dmidecode" && args[1] == "processor" {
 			return fixture(t, "dmidecode_processor.txt"), nil
 		}
 		return nil, errors.New("not available")
 	}
-	inv, err := Collect(context.Background(), run, nil)
+	inv, err := Host{Run: run}.Inventory(context.Background())
 	if err == nil || inv.CPU.Sockets != 2 {
 		t.Fatalf("inv = %+v, err = %v", inv, err)
 	}
@@ -122,12 +122,12 @@ func TestDeviceName(t *testing.T) {
 	}
 }
 
-func TestParseSlotsNewerDmidecode(t *testing.T) {
+func TestSlotsNewerDmidecode(t *testing.T) {
 	out := []byte("Handle 0x0901, DMI type 9, 24 bytes\nSystem Slot Information\n\tDesignation: PCIE2\n\tType: PCI Express 5 x16\n" +
 		"\tData Bus Width: 16x or x16\n\tCurrent Usage: In Use\n\tBus Address: 0000:a7:01.0\n\n" +
 		"Handle 0x0902, DMI type 9, 24 bytes\nSystem Slot Information\n\tDesignation: PCIE4\n\tType: PCI Express 4\n" +
 		"\tData Bus Width: 8x or x8\n\tCurrent Usage: Available\n\tBus Address: 0000:59:05.0\n")
-	slots := ParseSlots(out)
+	slots := parseSlots(out)
 	if len(slots) != 2 || slots[0].Width != "x16" || slots[0].Generation != "Gen5" || !slots[0].InUse ||
 		slots[1].Width != "x8" || slots[1].Generation != "Gen4" || slots[1].InUse {
 		t.Fatalf("slots = %+v", slots)
@@ -137,7 +137,7 @@ func TestParseSlotsNewerDmidecode(t *testing.T) {
 // The epyc fixtures come from a server whose firmware reports the card itself, not the port
 // above it, as the slot's bus address. All ten slots are populated: eight GPUs, a RAID
 // controller and a network adapter.
-func TestCollectSlotAddressIsCard(t *testing.T) {
+func TestSlotAddressIsCard(t *testing.T) {
 	paths := map[string]string{}
 	for _, line := range strings.Split(string(fixture(t, "epyc/sysfs_paths.txt")), "\n") {
 		if addr, path, ok := strings.Cut(line, " "); ok {
@@ -157,7 +157,7 @@ func TestCollectSlotAddressIsCard(t *testing.T) {
 		}
 		return nil, errors.New("not available")
 	}
-	inv, _ := Collect(context.Background(), run, resolve)
+	inv, _ := Host{Run: run, DevicePath: resolve}.Inventory(context.Background())
 	if len(inv.PCIeSlots) != 10 {
 		t.Fatalf("slots = %d", len(inv.PCIeSlots))
 	}

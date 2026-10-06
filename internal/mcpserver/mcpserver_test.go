@@ -19,8 +19,8 @@ import (
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/auth"
 	"github.com/aireet/kube-bmc/internal/collector"
-	"github.com/aireet/kube-bmc/internal/ipmi"
 	"github.com/aireet/kube-bmc/internal/server"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
 // backend is an in-memory server.Backend with two servers.

@@ -1,18 +1,18 @@
-package oob
+package redfish_test
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 
-	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
+	"github.com/aireet/kube-bmc/redfish"
 )
 
-// redfishServer implements the subset of the Redfish API used by Power.
+// redfishServer implements the subset of the Redfish API the client uses. It accepts
+// admin/secret and records reset requests.
 func redfishServer(t *testing.T) (*httptest.Server, func() []string) {
 	var mu sync.Mutex
 	var resets []string
@@ -58,52 +58,38 @@ func redfishServer(t *testing.T) (*httptest.Server, func() []string) {
 	}
 }
 
-func TestRedfishPower(t *testing.T) {
+func TestReset(t *testing.T) {
 	srv, resets := redfishServer(t)
-	target := Target{Address: srv.URL, Protocol: bmcv1.ProtocolRedfish, Insecure: true, Creds: Credentials{"admin", "secret"}}
-
-	if err := Power(context.Background(), target, bmcv1.ActionForceRestart); err != nil {
+	cfg := redfish.Config{Endpoint: srv.URL, Username: "admin", Password: "secret", Insecure: true}
+	c, err := redfish.Dial(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Reset(t.Context(), redfish.ForceRestart); err != nil {
 		t.Fatal(err)
 	}
 	if got := resets(); len(got) != 1 || got[0] != "ForceRestart" {
 		t.Fatalf("resets = %v", got)
 	}
-	if err := Power(context.Background(), target, "Explode"); err == nil {
-		t.Fatal("unsupported action accepted")
-	}
-
-	wrong := target
-	wrong.Creds.Password = "wrong"
-	if err := Power(context.Background(), wrong, bmcv1.ActionOn); err == nil {
-		t.Fatal("wrong credentials accepted")
-	}
-
-	strict := target
-	strict.Insecure = false
-	if err := Power(context.Background(), strict, bmcv1.ActionOn); err == nil {
-		t.Fatal("self-signed certificate accepted without Insecure")
+	if state, err := c.PowerState(t.Context()); err != nil || state != "On" {
+		t.Fatalf("power state %q, %v", state, err)
 	}
 }
 
-func TestTargetFor(t *testing.T) {
-	b := &bmcv1.BMC{}
-	b.Name = "n1"
-	if _, err := TargetFor(b, Credentials{}); err == nil || !strings.Contains(err.Error(), "no address") {
-		t.Fatalf("err = %v", err)
-	}
-	b.Status.Network.IPAddress = "10.0.0.5"
-	if tg, _ := TargetFor(b, Credentials{}); tg.Address != "10.0.0.5" || tg.Protocol != bmcv1.ProtocolRedfish {
-		t.Fatalf("target = %+v", tg)
-	}
-	b.Spec.Address, b.Spec.Protocol = "bmc-n1.example.com", bmcv1.ProtocolIPMI
-	if tg, _ := TargetFor(b, Credentials{}); tg.Address != "bmc-n1.example.com" || tg.Protocol != bmcv1.ProtocolIPMI {
-		t.Fatalf("target = %+v", tg)
-	}
-}
-
-func TestIPMIRejectsGracefulRestart(t *testing.T) {
-	err := Power(context.Background(), Target{Address: "127.0.0.1", Protocol: bmcv1.ProtocolIPMI}, bmcv1.ActionGracefulRestart)
-	if err == nil || !strings.Contains(err.Error(), "not supported over IPMI") {
-		t.Fatalf("err = %v", err)
+func TestDialFailures(t *testing.T) {
+	srv, _ := redfishServer(t)
+	for name, cfg := range map[string]redfish.Config{
+		"wrong password":     {Endpoint: srv.URL, Username: "admin", Password: "wrong", Insecure: true},
+		"untrusted TLS cert": {Endpoint: srv.URL, Username: "admin", Password: "secret"},
+	} {
+		c, err := redfish.Dial(context.Background(), cfg)
+		if err == nil {
+			err = c.Reset(t.Context(), redfish.On)
+			_ = c.Close()
+		}
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }

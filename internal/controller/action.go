@@ -13,11 +13,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
-	"github.com/aireet/kube-bmc/internal/oob"
+	"github.com/aireet/kube-bmc/bmc"
 )
-
-// PowerFunc executes a power action against a resolved target.
-type PowerFunc func(ctx context.Context, t oob.Target, a bmcv1.ActionType) error
 
 // ActionReconciler runs in the server. It rejects actions while actions are disabled,
 // executes power actions out-of-band that node agents cannot execute in-band (On,
@@ -27,9 +24,10 @@ type PowerFunc func(ctx context.Context, t oob.Target, a bmcv1.ActionType) error
 // Every executor claims an action with an optimistic-concurrency status update
 // (Pending→Running), so each action is executed at most once.
 type ActionReconciler struct {
-	Client      client.Client
-	Credentials Credentials
-	Power       PowerFunc
+	Client    client.Client
+	Endpoints Endpoints
+	// Power performs power actions; bmc.Power in production.
+	Power func(ctx context.Context, e bmc.Endpoint, a bmc.PowerAction) error
 	// Enabled is the master switch for actions. When false, new actions are rejected.
 	Enabled bool
 	// ClaimTimeout is how long in-band actions are left to the node agent.
@@ -80,32 +78,28 @@ func (r *ActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 				a.Spec.BMCName, r.ClaimTimeout, a.Spec.Action))
 		}
 	}
-	bmc := &bmcv1.BMC{}
-	if err := r.Client.Get(ctx, client.ObjectKey{Name: a.Spec.BMCName}, bmc); err != nil {
+	b := &bmcv1.BMC{}
+	if err := r.Client.Get(ctx, client.ObjectKey{Name: a.Spec.BMCName}, b); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseRejected, fmt.Sprintf("BMC %s not found", a.Spec.BMCName))
 		}
 		return ctrl.Result{}, err
 	}
-	creds, err := r.Credentials.For(ctx, bmc)
+	endpoint, err := r.Endpoints.For(ctx, b)
 	if err != nil {
 		reason := fmt.Sprintf("%s requires out-of-band access, which is not configured: %v", a.Spec.Action, err)
 		if InBand(a.Spec.Action) {
-			reason = fmt.Sprintf("the node agent on %s did not execute the action within %s and out-of-band access is not configured",
-				a.Spec.BMCName, r.ClaimTimeout)
+			reason = fmt.Sprintf("the node agent on %s did not execute the action within %s and out-of-band access is not configured: %v",
+				a.Spec.BMCName, r.ClaimTimeout, err)
 		}
 		return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseRejected, reason)
-	}
-	target, err := oob.TargetFor(bmc, creds)
-	if err != nil {
-		return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseRejected, err.Error())
 	}
 
 	start := r.now()
 	a.Status = bmcv1.BMCActionStatus{
 		Phase:            bmcv1.PhaseRunning,
-		Message:          fmt.Sprintf("sending %s to %s over %s", a.Spec.Action, target.Address, target.Protocol),
-		PowerStateBefore: bmc.Status.PowerState,
+		Message:          fmt.Sprintf("sending %s to %s over %s", a.Spec.Action, endpoint.Address, protocol(endpoint)),
+		PowerStateBefore: b.Status.PowerState,
 		StartTime:        &start,
 		Deadline:         &metav1.Time{Time: start.Add(r.Timeout)},
 	}
@@ -118,14 +112,21 @@ func (r *ActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	execCtx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
-	log.FromContext(ctx).Info("executing power action", "bmc", bmc.Name, "action", a.Spec.Action,
-		"requestedBy", a.Spec.RequestedBy, "address", target.Address)
-	if err := r.Power(execCtx, target, a.Spec.Action); err != nil {
-		recordEvent(ctx, r.Client, a, bmc.Spec.NodeName, err, r.now())
+	log.FromContext(ctx).Info("executing power action", "bmc", b.Name, "action", a.Spec.Action,
+		"requestedBy", a.Spec.RequestedBy, "address", endpoint.Address)
+	if err := r.Power(execCtx, endpoint, bmc.PowerAction(a.Spec.Action)); err != nil {
+		recordEvent(ctx, r.Client, a, b.Spec.NodeName, err, r.now())
 		return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseFailed, err.Error())
 	}
-	recordEvent(ctx, r.Client, a, bmc.Spec.NodeName, nil, r.now())
+	recordEvent(ctx, r.Client, a, b.Spec.NodeName, nil, r.now())
 	return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseSucceeded, fmt.Sprintf("%s accepted by the BMC", a.Spec.Action))
+}
+
+func protocol(e bmc.Endpoint) bmc.Protocol {
+	if e.Protocol == "" {
+		return bmc.Redfish
+	}
+	return e.Protocol
 }
 
 // deadlineGrace is how long after its deadline an executor has to record the outcome.

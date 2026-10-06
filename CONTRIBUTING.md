@@ -18,7 +18,7 @@ kube-bmc server to `localhost:8080` and run `make dev`, which starts Vite with h
 
 ## Hardware fixtures
 
-The parsers in `internal/ipmi` are tested against real `ipmitool` output in `internal/ipmi/testdata`. If kube-bmc misreads your hardware, the most useful thing you can send is the raw output of:
+The parsers in `ipmi` are tested against real `ipmitool` output in `ipmi/ipmitest/testdata`, which package `ipmitest` also offers to other projects. If kube-bmc misreads your hardware, the most useful thing you can send is the raw output of:
 
 ```bash
 ipmitool mc info; ipmitool lan print 1; ipmitool fru print 0; ipmitool chassis status

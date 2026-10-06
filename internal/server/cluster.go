@@ -27,29 +27,29 @@ import (
 // maxActions bounds the number of actions returned by ListActions.
 const maxActions = 100
 
-// KubeOptions configures the Kubernetes backend.
-type KubeOptions struct {
+// ClusterOptions configures the Kubernetes backend.
+type ClusterOptions struct {
 	// Namespace kube-bmc runs in; agent pods live here.
 	Namespace     string
 	AgentSelector labels.Selector
 	AgentPort     int
-	Credentials   controller.Credentials
+	Endpoints     controller.Endpoints
 	// StaleAfter applies to agents that do not renew a heartbeat Lease.
 	StaleAfter time.Duration
 }
 
-// Kube is the Backend for a live cluster. Reads go through an informer cache.
-type Kube struct {
+// Cluster is the Backend for a live cluster. Reads go through an informer cache.
+type Cluster struct {
 	client client.Client
-	opts   KubeOptions
+	opts   ClusterOptions
 	http   *http.Client
 }
 
-func NewKube(c client.Client, opts KubeOptions) *Kube {
-	return &Kube{client: c, opts: opts, http: &http.Client{Timeout: 10 * time.Second}}
+func NewCluster(c client.Client, opts ClusterOptions) *Cluster {
+	return &Cluster{client: c, opts: opts, http: &http.Client{Timeout: 10 * time.Second}}
 }
 
-func (k *Kube) List(ctx context.Context) ([]View, error) {
+func (k *Cluster) List(ctx context.Context) ([]View, error) {
 	var bmcs bmcv1.BMCList
 	if err := k.client.List(ctx, &bmcs); err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func (k *Kube) List(ctx context.Context) ([]View, error) {
 	return views, nil
 }
 
-func (k *Kube) Get(ctx context.Context, name string) (View, error) {
+func (k *Cluster) Get(ctx context.Context, name string) (View, error) {
 	b, err := k.bmc(ctx, name)
 	if err != nil {
 		return View{}, err
@@ -100,7 +100,7 @@ func (k *Kube) Get(ctx context.Context, name string) (View, error) {
 	return k.view(ctx, b, node, pods[b.Spec.NodeName], leases[b.Spec.NodeName]), nil
 }
 
-func (k *Kube) Live(ctx context.Context, name string) (*collector.Snapshot, error) {
+func (k *Cluster) Live(ctx context.Context, name string) (*collector.Snapshot, error) {
 	b, err := k.bmc(ctx, name)
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func (k *Kube) Live(ctx context.Context, name string) (*collector.Snapshot, erro
 	return &snap, nil
 }
 
-func (k *Kube) CreateAction(ctx context.Context, req ActionRequest) (*bmcv1.BMCAction, error) {
+func (k *Cluster) CreateAction(ctx context.Context, req ActionRequest) (*bmcv1.BMCAction, error) {
 	if _, err := k.bmc(ctx, req.BMC); err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (k *Kube) CreateAction(ctx context.Context, req ActionRequest) (*bmcv1.BMCA
 	return a, nil
 }
 
-func (k *Kube) ListActions(ctx context.Context, bmc string) ([]bmcv1.BMCAction, error) {
+func (k *Cluster) ListActions(ctx context.Context, bmc string) ([]bmcv1.BMCAction, error) {
 	var list bmcv1.BMCActionList
 	if err := k.client.List(ctx, &list); err != nil {
 		return nil, err
@@ -165,7 +165,7 @@ func (k *Kube) ListActions(ctx context.Context, bmc string) ([]bmcv1.BMCAction, 
 	return items, nil
 }
 
-func (k *Kube) GetAction(ctx context.Context, name string) (*bmcv1.BMCAction, error) {
+func (k *Cluster) GetAction(ctx context.Context, name string) (*bmcv1.BMCAction, error) {
 	a := &bmcv1.BMCAction{}
 	if err := k.client.Get(ctx, client.ObjectKey{Name: name}, a); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -176,7 +176,7 @@ func (k *Kube) GetAction(ctx context.Context, name string) (*bmcv1.BMCAction, er
 	return a, nil
 }
 
-func (k *Kube) bmc(ctx context.Context, name string) (*bmcv1.BMC, error) {
+func (k *Cluster) bmc(ctx context.Context, name string) (*bmcv1.BMC, error) {
 	b := &bmcv1.BMC{}
 	if err := k.client.Get(ctx, client.ObjectKey{Name: name}, b); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -188,7 +188,7 @@ func (k *Kube) bmc(ctx context.Context, name string) (*bmcv1.BMC, error) {
 }
 
 // agents returns the running agent pod for each node.
-func (k *Kube) agents(ctx context.Context) (map[string]*corev1.Pod, error) {
+func (k *Cluster) agents(ctx context.Context) (map[string]*corev1.Pod, error) {
 	var pods corev1.PodList
 	if err := k.client.List(ctx, &pods, client.InNamespace(k.opts.Namespace),
 		client.MatchingLabelsSelector{Selector: k.opts.AgentSelector}); err != nil {
@@ -206,7 +206,7 @@ func (k *Kube) agents(ctx context.Context) (map[string]*corev1.Pod, error) {
 }
 
 // leases returns the agent heartbeat Lease for each node.
-func (k *Kube) leases(ctx context.Context) (map[string]*coordinationv1.Lease, error) {
+func (k *Cluster) leases(ctx context.Context) (map[string]*coordinationv1.Lease, error) {
 	var list coordinationv1.LeaseList
 	if err := k.client.List(ctx, &list, client.InNamespace(k.opts.Namespace), client.HasLabels{agent.LeaseLabel}); err != nil {
 		return nil, err
@@ -218,7 +218,7 @@ func (k *Kube) leases(ctx context.Context) (map[string]*coordinationv1.Lease, er
 	return res, nil
 }
 
-func (k *Kube) view(ctx context.Context, b *bmcv1.BMC, node *corev1.Node, pod *corev1.Pod, lease *coordinationv1.Lease) View {
+func (k *Cluster) view(ctx context.Context, b *bmcv1.BMC, node *corev1.Node, pod *corev1.Pod, lease *coordinationv1.Lease) View {
 	v := View{Name: b.Name, Created: b.CreationTimestamp, Spec: b.Spec, Status: b.Status}
 	switch {
 	case lease != nil:
@@ -239,7 +239,7 @@ func (k *Kube) view(ctx context.Context, b *bmcv1.BMC, node *corev1.Node, pod *c
 		v.Agent = &AgentInfo{Pod: pod.Name, IP: pod.Status.PodIP, Ready: podReady(pod)}
 		v.InBandPower = v.Agent.Ready && !v.Stale
 	}
-	_, err := k.opts.Credentials.For(ctx, b)
+	_, err := k.opts.Endpoints.For(ctx, b)
 	v.OOBConfigured = err == nil
 	return v
 }

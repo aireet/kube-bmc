@@ -14,7 +14,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -35,15 +34,15 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
+	"github.com/aireet/kube-bmc/bmc"
+	"github.com/aireet/kube-bmc/hardware"
 	"github.com/aireet/kube-bmc/internal/agent"
 	"github.com/aireet/kube-bmc/internal/auth"
 	"github.com/aireet/kube-bmc/internal/collector"
 	"github.com/aireet/kube-bmc/internal/controller"
-	"github.com/aireet/kube-bmc/internal/hostinv"
-	"github.com/aireet/kube-bmc/internal/ipmi"
 	"github.com/aireet/kube-bmc/internal/mcpserver"
-	"github.com/aireet/kube-bmc/internal/oob"
 	"github.com/aireet/kube-bmc/internal/server"
+	"github.com/aireet/kube-bmc/ipmi"
 	"github.com/aireet/kube-bmc/web"
 )
 
@@ -72,7 +71,7 @@ func run() error {
 	case "hash-password":
 		return hashPassword(os.Args[2:])
 	case "inventory":
-		inv, err := hostinv.Collect(ctx, execOutput, hostinv.SysfsResolver)
+		inv, err := hardware.Read(ctx)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(inv)
@@ -150,15 +149,6 @@ func discoverOIDC(ctx context.Context, log *slog.Logger, cfg auth.OIDCConfig) (*
 	}
 }
 
-// execOutput runs a command and returns its standard output.
-func execOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
-	out, err := exec.CommandContext(ctx, name, args...).Output()
-	if err != nil {
-		return out, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
-	}
-	return out, nil
-}
-
 // envOr returns the environment variable key, or def when it is unset.
 func envOr(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok {
@@ -215,11 +205,9 @@ func runAgent(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	ipmiClient := ipmi.NewClient(ipmi.Exec{Path: *ipmitool}, *cacheDir)
+	ipmiClient := ipmi.New(ipmi.Tool{Path: *ipmitool})
 	col := collector.New(*node, ipmiClient, collector.Options{
-		Hardware: func(ctx context.Context) (hostinv.Inventory, error) {
-			return hostinv.Collect(ctx, execOutput, hostinv.SysfsResolver)
-		},
+		Hardware: hardware.Read, CacheDir: *cacheDir,
 		Interval: *interval, InventoryInterval: *invInterval, SELMinInterval: *selInterval, SELEntries: *selEntries,
 		CommandTimeout: 30 * time.Second, SELTimeout: 3 * time.Minute,
 	}, log)
@@ -314,9 +302,9 @@ func runServer(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	credentials := controller.Credentials{Reader: mgr.GetClient(), Namespace: *namespace, Default: *creds}
+	endpoints := controller.Endpoints{Reader: mgr.GetClient(), Namespace: *namespace, DefaultSecret: *creds}
 	if err := (&controller.ActionReconciler{
-		Client: mgr.GetClient(), Credentials: credentials, Power: oob.Power,
+		Client: mgr.GetClient(), Endpoints: endpoints, Power: bmc.Power,
 		Enabled: *actions, ClaimTimeout: *claimTimeout, Timeout: *actionTimeout, TTL: *actionTTL,
 	}).SetupWithManager(mgr); err != nil {
 		return err
@@ -372,8 +360,8 @@ func runServer(ctx context.Context, args []string) error {
 		return err
 	}
 
-	backend := server.NewKube(mgr.GetClient(), server.KubeOptions{
-		Namespace: *namespace, AgentSelector: sel, AgentPort: *agentPort, Credentials: credentials, StaleAfter: *staleAfter,
+	backend := server.NewCluster(mgr.GetClient(), server.ClusterOptions{
+		Namespace: *namespace, AgentSelector: sel, AgentPort: *agentPort, Endpoints: endpoints, StaleAfter: *staleAfter,
 	})
 	mcpSrv := mcpserver.New(mcpserver.Options{Backend: backend, Actions: *actions, Version: version})
 	var mcpHandler http.Handler = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv },

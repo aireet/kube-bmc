@@ -1,14 +1,18 @@
-// Package hostinv reads the hardware inventory of the host the agent runs on: processors,
-// memory modules and PCIe slots from SMBIOS (dmidecode), and PCI devices from lspci and
-// sysfs. IPMI does not report this information, but the privileged agent can read it from
-// the host directly. All commands are read-only.
-package hostinv
+// Package hardware reads the hardware inventory of a Linux host: processors, memory
+// modules and PCIe slots from SMBIOS with dmidecode, and PCI devices with lspci and
+// sysfs, including which device occupies which slot. IPMI does not report this
+// information. All commands are read-only; dmidecode needs root.
+//
+//	inv, err := hardware.Read(ctx)
+package hardware
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -24,9 +28,9 @@ type Inventory struct {
 	PCIeSlots []Slot      `json:"pcieSlots,omitempty"`
 }
 
-// Merge returns inv with every section that is empty taken from prev. Collect returns a
-// partial inventory when one of its sources fails; merging keeps the last known value of
-// the failed sections instead of dropping them.
+// Merge returns inv with every empty section taken from prev. Host.Inventory returns a
+// partial inventory when one of its sources fails; merging with the previous inventory
+// keeps the last known value of the failed sections instead of dropping them.
 func (inv Inventory) Merge(prev Inventory) Inventory {
 	if inv.CPU == (CPU{}) {
 		inv.CPU = prev.CPU
@@ -81,54 +85,75 @@ type PCIDevice struct {
 	Slot    string `json:"slot,omitempty"`
 }
 
-// Runner executes a command and returns its standard output.
-type Runner func(ctx context.Context, name string, args ...string) ([]byte, error)
+// Read reads the inventory of the local host.
+func Read(ctx context.Context) (Inventory, error) { return Host{}.Inventory(ctx) }
 
-// Resolver returns the sysfs device path of a PCI address, e.g.
-// /sys/devices/pci0000:15/0000:15:01.0/0000:16:00.0 for 0000:16:00.0.
-type Resolver func(address string) (string, error)
-
-// SysfsResolver resolves PCI addresses through /sys/bus/pci/devices.
-func SysfsResolver(address string) (string, error) {
-	return filepath.EvalSymlinks("/sys/bus/pci/devices/" + address)
+// Host reads an inventory through commands and sysfs. The zero value reads the local
+// host; the fields allow tests, or reading a host through another root.
+type Host struct {
+	// Run runs a command and returns its standard output. Nil runs it with os/exec.
+	Run func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// DevicePath returns the sysfs device path of a PCI address, such as
+	// /sys/devices/pci0000:15/0000:15:01.0/0000:16:00.0 for 0000:16:00.0. Nil resolves
+	// /sys/bus/pci/devices.
+	DevicePath func(address string) (string, error)
 }
 
-// Collect reads the inventory. Sources that fail are skipped, so a partial inventory is
-// returned together with the errors.
-func Collect(ctx context.Context, run Runner, resolve Resolver) (Inventory, error) {
+// Inventory reads the inventory. A source that fails is skipped, so a partial inventory
+// is returned together with the error; see Inventory.Merge.
+func (h Host) Inventory(ctx context.Context) (Inventory, error) {
+	run, path := h.Run, h.DevicePath
+	if run == nil {
+		run = command
+	}
+	if path == nil {
+		path = devicePath
+	}
 	var inv Inventory
 	var errs []error
 	if out, err := run(ctx, "dmidecode", "-t", "processor"); err == nil {
-		inv.CPU = ParseProcessors(out)
+		inv.CPU = parseProcessors(out)
 	} else {
 		errs = append(errs, err)
 	}
 	if out, err := run(ctx, "dmidecode", "-t", "memory"); err == nil {
-		inv.Memory = ParseMemory(out)
+		inv.Memory = parseMemory(out)
 	} else {
 		errs = append(errs, err)
 	}
 	var devices []PCIDevice
 	if out, err := run(ctx, "lspci", "-mm", "-nn", "-D"); err == nil {
-		devices = ParseLspci(out)
+		devices = parseLspci(out)
 	} else {
 		errs = append(errs, err)
 	}
 	if out, err := run(ctx, "dmidecode", "-t", "slot"); err == nil {
-		inv.PCIeSlots = ParseSlots(out)
+		inv.PCIeSlots = parseSlots(out)
 	} else {
 		errs = append(errs, err)
 	}
-	inv.PCIeSlots, devices = assignSlots(inv.PCIeSlots, devices, resolve)
+	inv.PCIeSlots, devices = assignSlots(inv.PCIeSlots, devices, path)
 	for _, d := range devices {
 		if isGPU(d) {
 			inv.GPUs = append(inv.GPUs, d)
 		}
 	}
 	if len(errs) > 0 {
-		return inv, fmt.Errorf("hardware inventory: %v", errs)
+		return inv, fmt.Errorf("hardware inventory: %w", errors.Join(errs...))
 	}
 	return inv, nil
+}
+
+func command(ctx context.Context, name string, args ...string) ([]byte, error) {
+	out, err := exec.CommandContext(ctx, name, args...).Output()
+	if err != nil {
+		return out, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return out, nil
+}
+
+func devicePath(address string) (string, error) {
+	return filepath.EvalSymlinks("/sys/bus/pci/devices/" + address)
 }
 
 // blocks splits dmidecode output into the key/value sets of each structure.
@@ -159,8 +184,8 @@ func atoi(s string) int {
 	return n
 }
 
-// ParseProcessors parses `dmidecode -t processor`.
-func ParseProcessors(out []byte) CPU {
+// parseProcessors parses `dmidecode -t processor`.
+func parseProcessors(out []byte) CPU {
 	var c CPU
 	for _, b := range blocks(out) {
 		if b["Status"] != "" && !strings.Contains(b["Status"], "Populated") {
@@ -182,8 +207,8 @@ func cleanCPUModel(s string) string {
 	return strings.Join(strings.Fields(cpuNoise.ReplaceAllString(s, "")), " ")
 }
 
-// ParseMemory parses `dmidecode -t memory`.
-func ParseMemory(out []byte) Memory {
+// parseMemory parses `dmidecode -t memory`.
+func parseMemory(out []byte) Memory {
 	var m Memory
 	for _, b := range blocks(out) {
 		if _, ok := b["Locator"]; !ok {
@@ -237,8 +262,8 @@ var (
 	slotSpec = regexp.MustCompile(`(?i)^(\S+)\s+PCI-?E\b.*$`)
 )
 
-// ParseSlots parses `dmidecode -t slot` and returns the PCIe slots.
-func ParseSlots(out []byte) []Slot {
+// parseSlots parses `dmidecode -t slot` and returns the PCIe slots.
+func parseSlots(out []byte) []Slot {
 	var res []Slot
 	for _, b := range blocks(out) {
 		t := b["Type"]
@@ -262,8 +287,8 @@ func ParseSlots(out []byte) []Slot {
 
 var lspciField = regexp.MustCompile(`"([^"]*)"`)
 
-// ParseLspci parses `lspci -mm -nn -D`.
-func ParseLspci(out []byte) []PCIDevice {
+// parseLspci parses `lspci -mm -nn -D`.
+func parseLspci(out []byte) []PCIDevice {
 	var res []PCIDevice
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
@@ -329,7 +354,7 @@ func isEndpoint(d PCIDevice) bool {
 // reports either the port above the slot or the card itself as the slot's bus address, so a
 // device belongs to a slot when the address is one of its upstream bridges, or when the
 // device is a function of the card at that address.
-func assignSlots(slots []Slot, devices []PCIDevice, resolve Resolver) ([]Slot, []PCIDevice) {
+func assignSlots(slots []Slot, devices []PCIDevice, resolve func(string) (string, error)) ([]Slot, []PCIDevice) {
 	if resolve == nil {
 		return slots, devices
 	}

@@ -20,22 +20,22 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
-	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
-// powerVerbs maps the power actions a node agent executes through the local BMC interface
-// to `ipmitool chassis power` sub-commands. On cannot be executed in-band because the agent
-// does not run while the host is off; GracefulRestart has no IPMI equivalent.
-var powerVerbs = map[bmcv1.ActionType]string{
-	bmcv1.ActionGracefulShutdown: "soft",
-	bmcv1.ActionForceOff:         "off",
-	bmcv1.ActionForceRestart:     "reset",
-	bmcv1.ActionPowerCycle:       "cycle",
+// inBandPower maps the power actions a node agent executes through the local BMC
+// interface to IPMI chassis control. On cannot be executed in-band because the agent does
+// not run while the host is off; GracefulRestart has no IPMI equivalent.
+var inBandPower = map[bmcv1.ActionType]ipmi.PowerAction{
+	bmcv1.ActionGracefulShutdown: ipmi.PowerSoftOff,
+	bmcv1.ActionForceOff:         ipmi.PowerOff,
+	bmcv1.ActionForceRestart:     ipmi.PowerReset,
+	bmcv1.ActionPowerCycle:       ipmi.PowerCycle,
 }
 
 // InBand reports whether a node agent executes a through the local BMC interface.
 func InBand(a bmcv1.ActionType) bool {
-	_, power := powerVerbs[a]
+	_, power := inBandPower[a]
 	return power || a == bmcv1.ActionIdentifyOn || a == bmcv1.ActionIdentifyOff || a == bmcv1.ActionClearSEL
 }
 
@@ -113,23 +113,17 @@ func (r *InBandReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	execCtx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
-	if verb, ok := powerVerbs[a.Spec.Action]; ok {
-		return ctrl.Result{}, r.power(ctx, execCtx, a, verb)
+	if op, ok := inBandPower[a.Spec.Action]; ok {
+		return ctrl.Result{}, r.power(ctx, execCtx, a, op)
 	}
 
 	var msg string
 	var err error
 	switch a.Spec.Action {
 	case bmcv1.ActionIdentifyOn:
-		msg = "identify light turned on until IdentifyOff"
-		if note, e := r.IPMI.Identify(execCtx, true); e != nil {
-			err = e
-		} else if note != "" {
-			msg = "identify light turned on; " + note
-		}
+		msg, err = r.identify(execCtx)
 	case bmcv1.ActionIdentifyOff:
-		msg = "identify light turned off"
-		_, err = r.IPMI.Identify(execCtx, false)
+		msg, err = "identify light turned off", r.IPMI.Identify(execCtx, 0)
 	case bmcv1.ActionClearSEL:
 		msg, err = r.clearSEL(execCtx, a)
 	}
@@ -147,7 +141,7 @@ func (r *InBandReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 // power executes a power action. Forced actions take the host, and this agent, down
 // immediately, so the outcome is recorded before the command is sent and corrected if the
 // command fails.
-func (r *InBandReconciler) power(ctx, execCtx context.Context, a *bmcv1.BMCAction, verb string) error {
+func (r *InBandReconciler) power(ctx, execCtx context.Context, a *bmcv1.BMCAction, op ipmi.PowerAction) error {
 	recordEvent(ctx, r.Client, a, r.Node, nil, clock(r.Now))
 	done := clock(r.Now)
 	a.Status.Phase, a.Status.CompletionTime = bmcv1.PhaseSucceeded, &done
@@ -155,7 +149,7 @@ func (r *InBandReconciler) power(ctx, execCtx context.Context, a *bmcv1.BMCActio
 	if err := r.Client.Status().Update(ctx, a); err != nil {
 		return fmt.Errorf("record action before execution: %w", err)
 	}
-	if err := r.IPMI.ChassisPower(execCtx, verb); err != nil {
+	if err := r.IPMI.SetPower(execCtx, op); err != nil {
 		recordEvent(ctx, r.Client, a, r.Node, err, clock(r.Now))
 		failed := clock(r.Now)
 		a.Status.Phase, a.Status.Message, a.Status.CompletionTime = bmcv1.PhaseFailed, err.Error(), &failed
@@ -164,11 +158,25 @@ func (r *InBandReconciler) power(ctx, execCtx context.Context, a *bmcv1.BMCActio
 	return nil
 }
 
+// identify turns the identify light on until IdentifyOff. BMCs that do not support an
+// indefinite identify keep it on for the longest timed interval instead.
+func (r *InBandReconciler) identify(ctx context.Context) (string, error) {
+	err := r.IPMI.Identify(ctx, ipmi.IdentifyIndefinitely)
+	if err == nil {
+		return "identify light turned on until IdentifyOff", nil
+	}
+	if err2 := r.IPMI.Identify(ctx, ipmi.MaxIdentify); err2 != nil {
+		return "", errors.Join(err, err2)
+	}
+	return fmt.Sprintf("identify light turned on for %d seconds; the BMC does not support an indefinite identify light",
+		int(ipmi.MaxIdentify.Seconds())), nil
+}
+
 // clearSEL saves the complete log to a compressed ConfigMap and clears the log only after
 // the archive was stored. Archives are kept per server up to SELArchives, independently of
 // the action TTL.
 func (r *InBandReconciler) clearSEL(ctx context.Context, a *bmcv1.BMCAction) (string, error) {
-	text, err := r.IPMI.SELText(ctx)
+	text, err := r.IPMI.ExportSEL(ctx)
 	if err != nil {
 		return "", fmt.Errorf("read the System Event Log; it was not cleared: %w", err)
 	}

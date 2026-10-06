@@ -36,6 +36,7 @@ import (
 	"github.com/aireet/kube-bmc/internal/agent"
 	"github.com/aireet/kube-bmc/internal/collector"
 	"github.com/aireet/kube-bmc/internal/controller"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
 // Clients is what the commands need from the cluster.
@@ -260,7 +261,7 @@ func (o *options) sensorsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printSensors(o.streams.Out, snap.Sensors, sensorFilter{Type: typ, Problems: problems, All: all}, o.color)
+			printSensors(o.streams.Out, snap.Sensors, sensorFilter{Type: ipmi.SensorType(typ), Problems: problems, All: all}, o.color)
 			return nil
 		},
 	}

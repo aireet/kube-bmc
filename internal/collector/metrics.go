@@ -6,7 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
 var (
@@ -113,9 +113,9 @@ func (m Metrics) Collect(ch chan<- prometheus.Metric) {
 			continue
 		}
 		seen[sn.Name] = true
-		gauge(descSensorSev, sevValue[sn.Severity], sn.Name, sn.Type)
+		gauge(descSensorSev, sevValue[sn.Severity], sn.Name, string(sn.Type))
 		if sn.Value != nil {
-			gauge(descSensor, *sn.Value, sn.Name, sn.Type, sn.Unit)
+			gauge(descSensor, *sn.Value, sn.Name, string(sn.Type), sn.Unit)
 		}
 	}
 }

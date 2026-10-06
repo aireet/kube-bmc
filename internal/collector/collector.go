@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aireet/kube-bmc/internal/hostinv"
-	"github.com/aireet/kube-bmc/internal/ipmi"
+	"github.com/aireet/kube-bmc/hardware"
+	"github.com/aireet/kube-bmc/ipmi"
 )
 
 // Snapshot is the collected state of a BMC. The agent serves it on /api/v1/snapshot.
@@ -27,7 +27,7 @@ import (
 type Snapshot struct {
 	Node        string                     `json:"node"`
 	CollectedAt time.Time                  `json:"collectedAt"`
-	MC          ipmi.MCInfo                `json:"mc"`
+	MC          ipmi.Controller            `json:"mc"`
 	GUID        string                     `json:"guid,omitempty"`
 	LAN         ipmi.LAN                   `json:"lan"`
 	FRU         ipmi.FRU                   `json:"fru"`
@@ -36,7 +36,7 @@ type Snapshot struct {
 	PowerWatts  int                        `json:"powerWatts"`
 	Sensors     []ipmi.Sensor              `json:"sensors"`
 	Events      []ipmi.Event               `json:"events"`
-	Hardware    *hostinv.Inventory         `json:"hardware,omitempty"`
+	Hardware    *hardware.Inventory        `json:"hardware,omitempty"`
 	Thresholds  map[string]ipmi.Thresholds `json:"-"`
 	// Errors holds the most recent error of each failing collection phase.
 	Errors map[string]string `json:"errors,omitempty"`
@@ -44,13 +44,15 @@ type Snapshot struct {
 
 type Options struct {
 	// Hardware reads the host hardware inventory. Nil disables it.
-	Hardware          func(ctx context.Context) (hostinv.Inventory, error)
+	Hardware          func(ctx context.Context) (hardware.Inventory, error)
 	Interval          time.Duration
 	InventoryInterval time.Duration
 	SELMinInterval    time.Duration
 	SELEntries        int
-	CommandTimeout    time.Duration
-	SELTimeout        time.Duration
+	// CacheDir holds the SDR cache file; empty disables the cache.
+	CacheDir       string
+	CommandTimeout time.Duration
+	SELTimeout     time.Duration
 }
 
 type Collector struct {
@@ -132,9 +134,9 @@ func (c *Collector) Ready() bool {
 }
 
 func (c *Collector) Run(ctx context.Context) {
-	c.step(ctx, "sdr-cache", c.opts.SELTimeout, func(ctx context.Context) error { return c.client.RefreshSDRCache(ctx) })
+	c.cacheSDR(ctx)
 	c.inventory(ctx)
-	c.fast(ctx)
+	c.readings(ctx)
 
 	fast := time.NewTicker(c.opts.Interval)
 	inv := time.NewTicker(c.opts.InventoryInterval)
@@ -145,43 +147,51 @@ func (c *Collector) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-fast.C:
-			c.fast(ctx)
+			c.readings(ctx)
 		case <-c.refresh:
 			c.mu.Lock()
 			c.snap.Events, c.selReadAt, c.selSeenAt = nil, time.Time{}, ""
 			c.mu.Unlock()
-			c.fast(ctx)
+			c.readings(ctx)
 		case <-inv.C:
-			c.step(ctx, "sdr-cache", c.opts.SELTimeout, func(ctx context.Context) error { return c.client.RefreshSDRCache(ctx) })
+			c.cacheSDR(ctx)
 			c.inventory(ctx)
 		}
 	}
 }
 
-// step runs one phase with its own timeout and records the error, if any.
-func (c *Collector) step(ctx context.Context, phase string, timeout time.Duration, fn func(context.Context) error) {
+// phase runs the collection phase name with its own timeout and records its error, if any.
+func (c *Collector) phase(ctx context.Context, name string, timeout time.Duration, fn func(context.Context) error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	start := time.Now()
 	err := fn(ctx)
-	observe(phase, time.Since(start), err)
+	observe(name, time.Since(start), err)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err != nil {
-		if c.snap.Errors[phase] != err.Error() {
-			c.log.Warn("collection failed", "phase", phase, "err", err)
+		if c.snap.Errors[name] != err.Error() {
+			c.log.Warn("collection failed", "phase", name, "err", err)
 		}
-		c.snap.Errors[phase] = err.Error()
+		c.snap.Errors[name] = err.Error()
 	} else {
-		delete(c.snap.Errors, phase)
+		delete(c.snap.Errors, name)
 	}
+}
+
+// cacheSDR dumps the Sensor Data Repository, which speeds up sensor and SEL reads.
+func (c *Collector) cacheSDR(ctx context.Context) {
+	if c.opts.CacheDir == "" {
+		return
+	}
+	c.phase(ctx, "sdr-cache", c.opts.SELTimeout, func(ctx context.Context) error { return c.client.CacheSDR(ctx, c.opts.CacheDir) })
 }
 
 func (c *Collector) inventory(ctx context.Context) {
 	t := c.opts.CommandTimeout
-	c.step(ctx, "mc", t, func(ctx context.Context) error {
-		mc, err := c.client.MCInfo(ctx)
+	c.phase(ctx, "mc", t, func(ctx context.Context) error {
+		mc, err := c.client.Controller(ctx)
 		if err != nil {
 			return err
 		}
@@ -192,14 +202,14 @@ func (c *Collector) inventory(ctx context.Context) {
 		}
 		return nil
 	})
-	c.step(ctx, "lan", t, func(ctx context.Context) error {
+	c.phase(ctx, "lan", t, func(ctx context.Context) error {
 		lan, err := c.client.LAN(ctx)
 		if err == nil {
 			c.set(func(s *Snapshot) { s.LAN = lan })
 		}
 		return err
 	})
-	c.step(ctx, "fru", t, func(ctx context.Context) error {
+	c.phase(ctx, "fru", t, func(ctx context.Context) error {
 		fru, err := c.client.FRU(ctx)
 		if err == nil {
 			c.set(func(s *Snapshot) { s.FRU = fru })
@@ -207,7 +217,7 @@ func (c *Collector) inventory(ctx context.Context) {
 		return err
 	})
 	if c.opts.Hardware != nil {
-		c.step(ctx, "hardware", t, func(ctx context.Context) error {
+		c.phase(ctx, "hardware", t, func(ctx context.Context) error {
 			inv, err := c.opts.Hardware(ctx)
 			c.set(func(s *Snapshot) {
 				if err != nil && s.Hardware != nil {
@@ -220,7 +230,7 @@ func (c *Collector) inventory(ctx context.Context) {
 			return err
 		})
 	}
-	c.step(ctx, "thresholds", c.opts.SELTimeout, func(ctx context.Context) error {
+	c.phase(ctx, "thresholds", c.opts.SELTimeout, func(ctx context.Context) error {
 		th, err := c.client.Thresholds(ctx)
 		if err == nil {
 			c.set(func(s *Snapshot) { s.Thresholds = th })
@@ -229,30 +239,32 @@ func (c *Collector) inventory(ctx context.Context) {
 	})
 }
 
-func (c *Collector) fast(ctx context.Context) {
+// readings reads the fast-changing state: chassis, power draw, sensors and the SEL
+// summary, then the SEL entries if they changed.
+func (c *Collector) readings(ctx context.Context) {
 	t := c.opts.CommandTimeout
-	c.step(ctx, "chassis", t, func(ctx context.Context) error {
+	c.phase(ctx, "chassis", t, func(ctx context.Context) error {
 		ch, err := c.client.Chassis(ctx)
 		if err == nil {
 			c.set(func(s *Snapshot) { s.Chassis = ch })
 		}
 		return err
 	})
-	c.step(ctx, "power", t, func(ctx context.Context) error {
-		w, err := c.client.Power(ctx)
+	c.phase(ctx, "power", t, func(ctx context.Context) error {
+		w, err := c.client.PowerReading(ctx)
 		if err == nil {
 			c.set(func(s *Snapshot) { s.PowerWatts = w })
 		}
 		return err
 	})
-	c.step(ctx, "sensors", t, func(ctx context.Context) error {
+	c.phase(ctx, "sensors", t, func(ctx context.Context) error {
 		sn, err := c.client.Sensors(ctx)
 		if err == nil {
 			c.set(func(s *Snapshot) { s.Sensors = sn })
 		}
 		return err
 	})
-	c.step(ctx, "sel-info", t, func(ctx context.Context) error {
+	c.phase(ctx, "sel-info", t, func(ctx context.Context) error {
 		info, err := c.client.SELInfo(ctx)
 		if err == nil {
 			c.set(func(s *Snapshot) { s.SELInfo = info })
@@ -260,7 +272,7 @@ func (c *Collector) fast(ctx context.Context) {
 		return err
 	})
 	c.set(func(s *Snapshot) { s.CollectedAt = time.Now() })
-	c.maybeReadSEL(ctx)
+	c.readEvents(ctx)
 
 	select {
 	case c.updates <- struct{}{}:
@@ -268,8 +280,8 @@ func (c *Collector) fast(ctx context.Context) {
 	}
 }
 
-// maybeReadSEL starts a background SEL read if the log changed and SELMinInterval has elapsed.
-func (c *Collector) maybeReadSEL(ctx context.Context) {
+// readEvents starts a background SEL read if the log changed and SELMinInterval has elapsed.
+func (c *Collector) readEvents(ctx context.Context) {
 	c.mu.Lock()
 	last := c.snap.SELInfo.LastAddTime
 	due := !c.selBusy && last != c.selSeenAt && time.Since(c.selReadAt) >= c.opts.SELMinInterval
@@ -281,8 +293,8 @@ func (c *Collector) maybeReadSEL(ctx context.Context) {
 		return
 	}
 	go func() {
-		c.step(ctx, "sel", c.opts.SELTimeout, func(ctx context.Context) error {
-			ev, err := c.client.SEL(ctx, c.opts.SELEntries)
+		c.phase(ctx, "sel", c.opts.SELTimeout, func(ctx context.Context) error {
+			ev, err := c.client.Events(ctx, c.opts.SELEntries)
 			if err == nil {
 				slices.Reverse(ev) // newest first
 				c.describe(ctx, ev)
@@ -311,7 +323,7 @@ func (c *Collector) describe(ctx context.Context, events []ipmi.Event) {
 				continue
 			}
 			lookups++
-			if r, err := c.client.SELRecord(ctx, e.ID); err == nil {
+			if r, err := c.client.EventRecord(ctx, e.ID); err == nil {
 				desc = r.Describe()
 			}
 			if len(c.described) > 4*c.opts.SELEntries {
