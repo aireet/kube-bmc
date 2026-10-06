@@ -141,6 +141,7 @@ export interface BMCAction {
     powerStateBefore?: PowerState
     selArchive?: string
     startTime?: string
+    deadline?: string
     completionTime?: string
   }
 }

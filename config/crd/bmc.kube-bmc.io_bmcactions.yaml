@@ -107,6 +107,13 @@ spec:
               completionTime:
                 format: date-time
                 type: string
+              deadline:
+                description: |-
+                  Deadline is set by the executor when it starts the action: the time by which it
+                  records the outcome. An action still Running after its deadline was interrupted,
+                  for example because the executing process stopped, and is marked Failed.
+                format: date-time
+                type: string
               message:
                 type: string
               phase:

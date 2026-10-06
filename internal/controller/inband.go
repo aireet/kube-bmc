@@ -63,6 +63,7 @@ type InBandReconciler struct {
 	// Enabled must also be set on the server; when false, the agent leaves actions alone
 	// and the server rejects them.
 	Enabled bool
+	// Timeout bounds the execution of an action and sets its deadline.
 	Timeout time.Duration
 	Now     func() time.Time
 }
@@ -100,6 +101,7 @@ func (r *InBandReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		Message:          fmt.Sprintf("executing %s in-band on %s", a.Spec.Action, r.Node),
 		PowerStateBefore: bmc.Status.PowerState,
 		StartTime:        &now,
+		Deadline:         &metav1.Time{Time: now.Add(r.Timeout)},
 	}
 	if err := r.Client.Status().Update(ctx, a); err != nil {
 		if apierrors.IsConflict(err) {

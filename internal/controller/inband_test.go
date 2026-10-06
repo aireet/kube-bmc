@@ -80,7 +80,8 @@ func TestInBandExecutes(t *testing.T) {
 			t.Fatalf("%s: phase at execution = %s", act, rec.phases[0])
 		}
 		a := f.action("a1")
-		if a.Status.Phase != bmcv1.PhaseSucceeded || a.Status.PowerStateBefore != bmcv1.PowerOn || a.Status.CompletionTime == nil {
+		if a.Status.Phase != bmcv1.PhaseSucceeded || a.Status.PowerStateBefore != bmcv1.PowerOn || a.Status.CompletionTime == nil ||
+			a.Status.Deadline == nil || a.Status.Deadline.Sub(a.Status.StartTime.Time) != r.Timeout {
 			t.Fatalf("%s: status = %+v", act, a.Status)
 		}
 		var events corev1.EventList

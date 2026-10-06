@@ -90,6 +90,11 @@ type BMCActionStatus struct {
 	SELArchive string `json:"selArchive,omitempty"`
 	// +optional
 	StartTime *metav1.Time `json:"startTime,omitempty"`
+	// Deadline is set by the executor when it starts the action: the time by which it
+	// records the outcome. An action still Running after its deadline was interrupted,
+	// for example because the executing process stopped, and is marked Failed.
+	// +optional
+	Deadline *metav1.Time `json:"deadline,omitempty"`
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 }

@@ -102,7 +102,8 @@ func TestActionSucceeds(t *testing.T) {
 	f.reconcile("a1")
 
 	a := f.action("a1")
-	if a.Status.Phase != bmcv1.PhaseSucceeded || a.Status.PowerStateBefore != bmcv1.PowerOn || a.Status.CompletionTime == nil {
+	if a.Status.Phase != bmcv1.PhaseSucceeded || a.Status.PowerStateBefore != bmcv1.PowerOn || a.Status.CompletionTime == nil ||
+		a.Status.Deadline == nil || !a.Status.Deadline.Equal(&metav1.Time{Time: f.now.Add(f.r.Timeout)}) {
 		t.Fatalf("status = %+v", a.Status)
 	}
 	if len(f.calls) != 1 || f.calls[0].action != bmcv1.ActionForceRestart || f.calls[0].target.Address != "10.0.0.7" ||
@@ -156,14 +157,38 @@ func TestActionRejected(t *testing.T) {
 	}
 }
 
-func TestInterruptedActionFails(t *testing.T) {
-	a := action("a1", "gpu-01", bmcv1.ActionOn)
-	started := metav1.NewTime(time.Date(2026, 10, 5, 11, 0, 0, 0, time.UTC))
-	a.Status = bmcv1.BMCActionStatus{Phase: bmcv1.PhaseRunning, StartTime: &started}
-	f := newFixture(t, true, bmc("gpu-01"), secret, a)
-	f.reconcile("a1")
-	if got := f.action("a1"); got.Status.Phase != bmcv1.PhaseFailed || len(f.calls) != 0 {
-		t.Fatalf("status = %+v, calls = %d", got.Status, len(f.calls))
+// The watchdog trusts the deadline recorded by the executor, so an agent that executes an
+// action for longer than the server's own timeout is not interrupted.
+func TestRunningActionWatchdog(t *testing.T) {
+	at := func(h, m, s int) *metav1.Time {
+		return &metav1.Time{Time: time.Date(2026, 10, 5, h, m, s, 0, time.UTC)}
+	}
+	for _, tc := range []struct {
+		name      string
+		status    bmcv1.BMCActionStatus
+		failed    bool
+		requeueIn time.Duration
+	}{
+		{"agent deadline beyond the server timeout", bmcv1.BMCActionStatus{StartTime: at(11, 56, 0), Deadline: at(12, 1, 0)}, false, 2 * time.Minute},
+		{"within the grace period", bmcv1.BMCActionStatus{StartTime: at(11, 50, 0), Deadline: at(11, 59, 30)}, false, 30 * time.Second},
+		{"past the deadline", bmcv1.BMCActionStatus{StartTime: at(11, 50, 0), Deadline: at(11, 55, 0)}, true, 0},
+		{"no deadline, started recently", bmcv1.BMCActionStatus{StartTime: at(11, 59, 0)}, false, 2 * time.Minute},
+		{"no deadline, started long ago", bmcv1.BMCActionStatus{StartTime: at(11, 0, 0)}, true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := action("a1", "gpu-01", bmcv1.ActionClearSEL)
+			a.Status = tc.status
+			a.Status.Phase = bmcv1.PhaseRunning
+			f := newFixture(t, true, bmc("gpu-01"), secret, a)
+			res := f.reconcile("a1")
+			got := f.action("a1")
+			if failed := got.Status.Phase == bmcv1.PhaseFailed; failed != tc.failed || res.RequeueAfter != tc.requeueIn {
+				t.Fatalf("phase %s (%s), requeue after %v", got.Status.Phase, got.Status.Message, res.RequeueAfter)
+			}
+			if len(f.calls) != 0 {
+				t.Fatal("a running action was executed again")
+			}
+		})
 	}
 }
 

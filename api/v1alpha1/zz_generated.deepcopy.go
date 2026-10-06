@@ -133,6 +133,10 @@ func (in *BMCActionStatus) DeepCopyInto(out *BMCActionStatus) {
 		in, out := &in.StartTime, &out.StartTime
 		*out = (*in).DeepCopy()
 	}
+	if in.Deadline != nil {
+		in, out := &in.Deadline, &out.Deadline
+		*out = (*in).DeepCopy()
+	}
 	if in.CompletionTime != nil {
 		in, out := &in.CompletionTime, &out.CompletionTime
 		*out = (*in).DeepCopy()

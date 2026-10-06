@@ -34,8 +34,7 @@ type ActionReconciler struct {
 	Enabled bool
 	// ClaimTimeout is how long in-band actions are left to the node agent.
 	ClaimTimeout time.Duration
-	// Timeout bounds a single execution; Running actions older than twice this value are
-	// marked Failed because the executing replica must have stopped.
+	// Timeout bounds a single out-of-band execution and sets its deadline.
 	Timeout time.Duration
 	// TTL is how long finished actions are kept. Zero keeps them forever.
 	TTL time.Duration
@@ -65,10 +64,7 @@ func (r *ActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	case a.Status.Phase.Done():
 		return r.expire(ctx, a)
 	case a.Status.Phase == bmcv1.PhaseRunning:
-		if a.Status.StartTime != nil && r.now().Sub(a.Status.StartTime.Time) > 2*r.Timeout {
-			return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseFailed, "execution was interrupted before completion")
-		}
-		return ctrl.Result{RequeueAfter: 2 * r.Timeout}, nil
+		return r.watch(ctx, a)
 	}
 
 	if !r.Enabled {
@@ -111,6 +107,7 @@ func (r *ActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		Message:          fmt.Sprintf("sending %s to %s over %s", a.Spec.Action, target.Address, target.Protocol),
 		PowerStateBefore: bmc.Status.PowerState,
 		StartTime:        &start,
+		Deadline:         &metav1.Time{Time: start.Add(r.Timeout)},
 	}
 	if err := r.Client.Status().Update(ctx, a); err != nil {
 		if apierrors.IsConflict(err) {
@@ -129,6 +126,29 @@ func (r *ActionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 	recordEvent(ctx, r.Client, a, bmc.Spec.NodeName, nil, r.now())
 	return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseSucceeded, fmt.Sprintf("%s accepted by the BMC", a.Spec.Action))
+}
+
+// deadlineGrace is how long after its deadline an executor has to record the outcome.
+const deadlineGrace = time.Minute
+
+// watch fails a Running action whose executor did not record an outcome by the deadline
+// the executor set, whichever component that is.
+func (r *ActionReconciler) watch(ctx context.Context, a *bmcv1.BMCAction) (ctrl.Result, error) {
+	var deadline time.Time
+	switch {
+	case a.Status.Deadline != nil:
+		deadline = a.Status.Deadline.Time
+	case a.Status.StartTime != nil:
+		// Started by a version that did not record deadlines.
+		deadline = a.Status.StartTime.Add(2 * r.Timeout)
+	default:
+		deadline = a.CreationTimestamp.Add(2 * r.Timeout)
+	}
+	if wait := deadline.Add(deadlineGrace).Sub(r.now().Time); wait > 0 {
+		return ctrl.Result{RequeueAfter: wait}, nil
+	}
+	return ctrl.Result{}, r.finish(ctx, a, bmcv1.PhaseFailed, fmt.Sprintf(
+		"execution was interrupted: no outcome was recorded by the deadline %s", deadline.UTC().Format(time.RFC3339)))
 }
 
 func (r *ActionReconciler) finish(ctx context.Context, a *bmcv1.BMCAction, phase bmcv1.ActionPhase, msg string) error {
