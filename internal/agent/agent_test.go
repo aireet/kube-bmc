@@ -260,6 +260,29 @@ func TestProblemHysteresis(t *testing.T) {
 	}
 }
 
+// A source is reported once, at the highest severity observed within the clear delay.
+func TestProblemEscalation(t *testing.T) {
+	w := &statusWriter{}
+	t0 := time.Now()
+	warn := bmcv1.Problem{Severity: bmcv1.HealthWarning, Source: "Inlet_Temp", Message: "38 C above upper non-critical"}
+	crit := bmcv1.Problem{Severity: bmcv1.HealthCritical, Source: "Inlet_Temp", Message: "51 C above upper critical"}
+
+	w.debounce([]bmcv1.Problem{warn}, bmcv1.HealthWarning, t0)
+	got, h := w.debounce([]bmcv1.Problem{crit}, bmcv1.HealthCritical, t0.Add(time.Minute))
+	if len(got) != 1 || got[0] != crit || h != bmcv1.HealthCritical {
+		t.Fatalf("escalated: %v %s", got, h)
+	}
+	// Back to warning: the critical reading is held for the clear delay, then lowered.
+	got, h = w.debounce([]bmcv1.Problem{warn}, bmcv1.HealthWarning, t0.Add(2*time.Minute))
+	if len(got) != 1 || got[0] != crit || h != bmcv1.HealthCritical {
+		t.Fatalf("within delay: %v %s", got, h)
+	}
+	got, h = w.debounce([]bmcv1.Problem{warn}, bmcv1.HealthWarning, t0.Add(7*time.Minute))
+	if len(got) != 1 || got[0] != warn || h != bmcv1.HealthWarning {
+		t.Fatalf("after delay: %v %s", got, h)
+	}
+}
+
 func TestLeaseExpired(t *testing.T) {
 	now := time.Now()
 	l := &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{

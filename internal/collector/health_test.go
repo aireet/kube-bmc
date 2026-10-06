@@ -54,6 +54,35 @@ func TestEvaluateRealServer(t *testing.T) {
 	}
 }
 
+func TestEvaluateOneProblemPerSource(t *testing.T) {
+	lnr := func(name string) ipmi.Sensor {
+		return ipmi.Sensor{Name: name, Type: "fan", Reading: "0 RPM", Status: "lnr", Severity: ipmi.SeverityCritical}
+	}
+	unc := ipmi.Sensor{Name: "FAN1", Type: "fan", Reading: "900 RPM", Status: "lnc", Severity: ipmi.SeverityWarning}
+	s := &Snapshot{
+		MC:      ipmi.MCInfo{FirmwareVersion: "1"},
+		Sensors: []ipmi.Sensor{unc, lnr("FAN1"), lnr("FAN2")},
+		Chassis: ipmi.Chassis{Faults: []string{"Cooling/Fan Fault", "Power Overload"}, IntrusionActive: true},
+	}
+	_, _, problems := Evaluate(s)
+	bySource := map[string]bmcv1.Problem{}
+	for _, p := range problems {
+		if _, dup := bySource[p.Source]; dup {
+			t.Fatalf("source %s raised several problems: %+v", p.Source, problems)
+		}
+		bySource[p.Source] = p
+	}
+	if bySource["FAN1"].Severity != bmcv1.HealthCritical {
+		t.Errorf("FAN1 = %+v; want the most severe reading", bySource["FAN1"])
+	}
+	if got := bySource["chassis"].Message; got != "Cooling/Fan Fault, Power Overload reported by the BMC" {
+		t.Errorf("chassis = %q", got)
+	}
+	if bySource["intrusion"].Severity != bmcv1.HealthWarning {
+		t.Errorf("intrusion = %+v", bySource["intrusion"])
+	}
+}
+
 func TestEvaluateHealthy(t *testing.T) {
 	v := 25.0
 	s := &Snapshot{MC: ipmi.MCInfo{FirmwareVersion: "1"}, Sensors: []ipmi.Sensor{{Name: "Inlet", Type: "temperature", Value: &v, Severity: ipmi.SeverityOK}}}

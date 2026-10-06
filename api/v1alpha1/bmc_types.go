@@ -140,7 +140,8 @@ type SensorSummary struct {
 // Problem is a human-readable reason that degrades health.
 type Problem struct {
 	Severity Health `json:"severity"`
-	// Source is what raised the problem: a sensor name, "chassis" or "sel".
+	// Source is what raised the problem: a sensor name, "chassis", "intrusion", "sel"
+	// or "security". A source raises at most one problem at a time.
 	Source  string `json:"source"`
 	Message string `json:"message"`
 }

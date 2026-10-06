@@ -17,6 +17,7 @@ var statusText = map[string]string{
 }
 
 // Evaluate derives health, a sensor summary and a worst-first problem list from a snapshot.
+// Each source raises at most one problem, so a source identifies its problem.
 func Evaluate(s *Snapshot) (bmcv1.Health, bmcv1.SensorSummary, []bmcv1.Problem) {
 	var sum bmcv1.SensorSummary
 	var problems []bmcv1.Problem
@@ -40,11 +41,11 @@ func Evaluate(s *Snapshot) (bmcv1.Health, bmcv1.SensorSummary, []bmcv1.Problem) 
 		}
 	}
 
-	for _, f := range s.Chassis.Faults {
-		add(bmcv1.HealthCritical, "chassis", f+" reported by the BMC")
+	if len(s.Chassis.Faults) > 0 {
+		add(bmcv1.HealthCritical, "chassis", strings.Join(s.Chassis.Faults, ", ")+" reported by the BMC")
 	}
 	if s.Chassis.IntrusionActive {
-		add(bmcv1.HealthWarning, "chassis", "Chassis intrusion detected")
+		add(bmcv1.HealthWarning, "intrusion", "Chassis intrusion detected")
 	}
 	if n := loginFailures(s.Events); n >= loginFailureThreshold {
 		add(bmcv1.HealthWarning, "security", fmt.Sprintf("%d failed BMC logins among the newest %d SEL entries", n, len(s.Events)))
@@ -54,6 +55,13 @@ func Evaluate(s *Snapshot) (bmcv1.Health, bmcv1.SensorSummary, []bmcv1.Problem) 
 	}
 
 	slices.SortStableFunc(problems, func(a, b bmcv1.Problem) int { return b.Severity.Rank() - a.Severity.Rank() })
+	// BMCs may report several sensors with the same name; keep the most severe.
+	seen := map[string]bool{}
+	problems = slices.DeleteFunc(problems, func(p bmcv1.Problem) bool {
+		dup := seen[p.Source]
+		seen[p.Source] = true
+		return dup
+	})
 
 	health := bmcv1.HealthOK
 	switch {

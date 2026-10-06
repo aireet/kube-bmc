@@ -44,16 +44,11 @@ type statusWriter struct {
 
 	obj       *bmcv1.BMC
 	lastWrite time.Time
-	// problemSeen records when each problem (by severity and source) was last observed.
-	problemSeen map[problemKey]seenProblem
+	// seen records, per problem source and severity, the problem last observed.
+	seen map[string]map[bmcv1.Health]observation
 }
 
-type problemKey struct {
-	severity bmcv1.Health
-	source   string
-}
-
-type seenProblem struct {
+type observation struct {
 	problem bmcv1.Problem
 	at      time.Time
 }
@@ -99,31 +94,44 @@ var selProblemSources = []string{"sel", "security", "SEL_Status"}
 
 // forget drops the remembered problems of the given sources.
 func (w *statusWriter) forget(sources ...string) {
-	for k := range w.problemSeen {
-		if slices.Contains(sources, k.source) {
-			delete(w.problemSeen, k)
-		}
+	for _, src := range sources {
+		delete(w.seen, src)
 	}
 }
 
-// debounce keeps problems that disappeared less than problemClearDelay ago and raises
-// health accordingly.
+// debounce reports, for each source, the most severe problem observed within the last
+// problemClearDelay, and raises health accordingly. A problem is reported as soon as it
+// is observed; it is cleared, or lowered in severity, only after it stayed away for the
+// delay, which suppresses flapping around thresholds.
 func (w *statusWriter) debounce(current []bmcv1.Problem, health bmcv1.Health, now time.Time) ([]bmcv1.Problem, bmcv1.Health) {
-	if w.problemSeen == nil {
-		w.problemSeen = map[problemKey]seenProblem{}
+	if w.seen == nil {
+		w.seen = map[string]map[bmcv1.Health]observation{}
 	}
 	for _, p := range current {
-		w.problemSeen[problemKey{p.Severity, p.Source}] = seenProblem{problem: p, at: now}
+		if w.seen[p.Source] == nil {
+			w.seen[p.Source] = map[bmcv1.Health]observation{}
+		}
+		w.seen[p.Source][p.Severity] = observation{problem: p, at: now}
 	}
-	out := make([]bmcv1.Problem, 0, len(w.problemSeen))
-	for k, s := range w.problemSeen {
-		if now.Sub(s.at) > problemClearDelay {
-			delete(w.problemSeen, k)
+	var out []bmcv1.Problem
+	for src, bySeverity := range w.seen {
+		var worst *bmcv1.Problem
+		for sev, o := range bySeverity {
+			if now.Sub(o.at) > problemClearDelay {
+				delete(bySeverity, sev)
+				continue
+			}
+			if worst == nil || o.problem.Severity.Rank() > worst.Severity.Rank() {
+				worst = &o.problem
+			}
+		}
+		if worst == nil {
+			delete(w.seen, src)
 			continue
 		}
-		out = append(out, s.problem)
-		if s.problem.Severity.Rank() > health.Rank() {
-			health = s.problem.Severity
+		out = append(out, *worst)
+		if worst.Severity.Rank() > health.Rank() {
+			health = worst.Severity
 		}
 	}
 	slices.SortFunc(out, func(a, b bmcv1.Problem) int {
@@ -132,9 +140,6 @@ func (w *statusWriter) debounce(current []bmcv1.Problem, health bmcv1.Health, no
 		}
 		return strings.Compare(a.Source, b.Source)
 	})
-	if len(out) == 0 {
-		out = nil
-	}
 	return out, health
 }
 
