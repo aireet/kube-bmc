@@ -35,6 +35,10 @@ test: ## Run the Go and UI unit tests.
 e2e: ## Run the end-to-end test in a temporary kind cluster (requires docker, kind, helm).
 	test/e2e/run.sh
 
+.PHONY: verify
+verify: generate lint test ## Run the CI checks locally: generated code, lint and tests.
+	git diff --exit-code -- api config charts/kube-bmc/crds
+
 .PHONY: lint
 lint: ## Run golangci-lint and the UI type checker.
 	golangci-lint run
