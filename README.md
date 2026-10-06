@@ -29,17 +29,26 @@
 
 ![Dashboard](docs/images/fleet.png)
 
+| Server details with hardware and PCIe slots | AI agents over MCP |
+|---|---|
+| ![Server details](docs/images/server.png) | ![AI agents](docs/images/ai-agents.png) |
+| **Actions** from the dashboard, kubectl and AI agents | **Grafana dashboard** |
+| ![Actions](docs/images/actions.png) | ![Grafana dashboard](docs/images/grafana.png) |
+
 <details>
 <summary>More screenshots</summary>
 
-| Server details | Sensors |
+| Sensors | System event log |
 |---|---|
-| ![Server details](docs/images/server.png) | ![Sensors](docs/images/sensors.png) |
-| **System event log** (decoded failed BMC logins) | **Power actions** |
-| ![Event log](docs/images/events.png) | ![Power actions](docs/images/actions.png) |
+| ![Sensors](docs/images/sensors.png) | ![Event log](docs/images/events.png) |
+| **Dark theme** | |
+| ![Dark theme](docs/images/fleet-dark.png) | |
 
-Screenshots show real servers; addresses and serial numbers are replaced.
 </details>
+
+The dashboard screenshots show two real servers, with addresses and serial numbers replaced,
+and eight generated ones that illustrate a larger fleet. The Grafana screenshot shows the two
+real servers.
 
 ## Overview
 
@@ -115,6 +124,8 @@ Agents are first-class but accountable: every action is a `BMCAction` recorded w
 identity and a mandatory reason, destructive tools are annotated so clients ask before calling
 them, and actions can be disabled entirely. The dashboard's **AI agents** dialog shows the
 endpoint and a ready-to-copy client configuration. See [docs/mcp.md](docs/mcp.md).
+
+![Connect an AI agent](docs/images/ai-agents.png)
 
 ## Installation
 
@@ -322,6 +333,8 @@ Agents expose Prometheus metrics on port 9580. Every metric carries a `node` lab
 
 Example alerting rules: [examples/prometheus-rules.yaml](examples/prometheus-rules.yaml). A Grafana
 dashboard is included; see [docs/grafana.md](docs/grafana.md).
+
+![Grafana dashboard](docs/images/grafana.png)
 
 ## Security
 

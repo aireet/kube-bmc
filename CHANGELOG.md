@@ -9,6 +9,8 @@ All notable changes to this project are documented in this file. The format foll
 - PCIe slots on servers whose firmware reports the installed card, not the port above the slot,
   as the slot's bus address (seen on AMD EPYC boards) showed no device. Slot names no longer
   repeat the link description, e.g. `SLOT1` instead of `SLOT1 PCI-E 4.0 X16`.
+- Grafana dashboard: series are aggregated by node, so an agent restart no longer shows a server
+  twice; hardware health is colored by state.
 
 ## [0.4.0] - 2026-10-06
 

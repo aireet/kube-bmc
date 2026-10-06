@@ -96,7 +96,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count(kube_bmc_up{node=~\"$node\"})",
+          "expr": "count(max by (node) (kube_bmc_up{node=~\"$node\"}))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -157,7 +157,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(kube_bmc_up{node=~\"$node\"})",
+          "expr": "sum(max by (node) (kube_bmc_up{node=~\"$node\"}))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -222,7 +222,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count(kube_bmc_health{node=~\"$node\"} == 3) or vector(0)",
+          "expr": "count(max by (node) (kube_bmc_health{node=~\"$node\"}) == 3) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -287,7 +287,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count(kube_bmc_health{node=~\"$node\"} == 2) or vector(0)",
+          "expr": "count(max by (node) (kube_bmc_health{node=~\"$node\"}) == 2) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -352,7 +352,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(kube_bmc_power_watts{node=~\"$node\"})",
+          "expr": "sum(max by (node) (kube_bmc_power_watts{node=~\"$node\"}))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -483,7 +483,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(kube_bmc_gpus{node=~\"$node\"}) or vector(0)",
+          "expr": "sum(max by (node, model) (kube_bmc_gpus{node=~\"$node\"})) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -544,7 +544,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(kube_bmc_pcie_slots{state=\"free\",node=~\"$node\"}) or vector(0)",
+          "expr": "sum(max by (node) (kube_bmc_pcie_slots{state=\"free\",node=~\"$node\"})) or vector(0)",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -617,7 +617,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "kube_bmc_health{node=~\"$node\"}",
+          "expr": "max by (node) (kube_bmc_health{node=~\"$node\"})",
           "legendFormat": "{{node}}",
           "refId": "A"
         }
@@ -627,7 +627,7 @@
         "mergeValues": true,
         "rowHeight": 0.8,
         "legend": {
-          "showLegend": true,
+          "showLegend": false,
           "displayMode": "list",
           "placement": "bottom"
         }
@@ -641,8 +641,20 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "text",
+                "color": "gray",
                 "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              },
+              {
+                "color": "orange",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 3
               }
             ]
           },
@@ -682,7 +694,7 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 9,
+        "h": 6,
         "w": 24,
         "x": 0,
         "y": 13
@@ -765,7 +777,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (node) (kube_bmc_gpus{node=~\"$node\"})",
+          "expr": "sum by (node) (max by (node, model) (kube_bmc_gpus{node=~\"$node\"}))",
           "legendFormat": "",
           "refId": "G",
           "instant": true,
@@ -892,6 +904,36 @@
               {
                 "id": "custom.width",
                 "value": 110
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "gray",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    },
+                    {
+                      "color": "orange",
+                      "value": 2
+                    },
+                    {
+                      "color": "red",
+                      "value": 3
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
               }
             ]
           },
@@ -1004,7 +1046,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 22
+        "y": 19
       },
       "panels": []
     },
@@ -1021,7 +1063,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 23
+        "y": 20
       },
       "targets": [
         {
@@ -1029,7 +1071,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "kube_bmc_power_watts{node=~\"$node\"}",
+          "expr": "max by (node) (kube_bmc_power_watts{node=~\"$node\"})",
           "legendFormat": "{{node}}",
           "refId": "A"
         }
@@ -1080,7 +1122,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 23
+        "y": 20
       },
       "targets": [
         {
@@ -1088,7 +1130,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "kube_bmc_inlet_temperature_celsius{node=~\"$node\"}",
+          "expr": "max by (node) (kube_bmc_inlet_temperature_celsius{node=~\"$node\"})",
           "legendFormat": "{{node}}",
           "refId": "A"
         }
@@ -1159,7 +1201,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 31
+        "y": 28
       },
       "targets": [
         {
@@ -1218,7 +1260,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 31
+        "y": 28
       },
       "targets": [
         {
@@ -1273,7 +1315,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 36
       },
       "panels": []
     },
@@ -1289,7 +1331,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 40
+        "y": 37
       },
       "targets": [
         {
@@ -1297,7 +1339,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "kube_bmc_sel_used_ratio{node=~\"$node\"}",
+          "expr": "max by (node) (kube_bmc_sel_used_ratio{node=~\"$node\"})",
           "legendFormat": "{{node}}",
           "refId": "A",
           "instant": true,
@@ -1358,7 +1400,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 40
+        "y": 37
       },
       "targets": [
         {
@@ -1366,7 +1408,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "kube_bmc_chassis_fault{node=~\"$node\"} == 1",
+          "expr": "max by (node, fault) (kube_bmc_chassis_fault{node=~\"$node\"}) == 1",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -1418,7 +1460,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 40
+        "y": 37
       },
       "targets": [
         {

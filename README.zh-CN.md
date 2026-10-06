@@ -19,6 +19,14 @@
 
 ![控制台](docs/images/fleet.png)
 
+| 服务器详情：硬件与 PCIe 插槽 | AI Agent 接入（MCP） |
+|---|---|
+| ![服务器详情](docs/images/server.png) | ![AI Agent](docs/images/ai-agents.png) |
+| **操作记录**：来自控制台、kubectl 和 AI Agent | **Grafana 面板** |
+| ![操作记录](docs/images/actions.png) | ![Grafana 面板](docs/images/grafana.png) |
+
+控制台截图中有两台真实服务器（地址和序列号已替换），其余八台为生成的数据，用于展示较大规模的集群；Grafana 截图为两台真实服务器。
+
 ## 概述
 
 kube-bmc 在每个节点上运行一个 agent，通过带内 IPMI 接口（`/dev/ipmi0`）读取本机 BMC。监控不需要 BMC 地址，也不需要凭证。每个节点对应一个集群级 `BMC` 对象，其 owner 是对应的 `Node`。
@@ -37,7 +45,7 @@ server131   server131   10.20.0.31      Gooxi    SY8108G-G4   On      1240    43
 - **电源控制**：关机、强制重启、断电重启由目标节点上的 agent 通过本机 BMC 通道（`/dev/ipmi0`）执行，不需要 BMC 账号密码，也不需要 BMC 管理网可达；开机需要带外通道（Redfish / IPMI-over-LAN）。每次请求都是一个 `BMCAction` 对象，同时作为审计记录。默认关闭。
 - **三种入口**：Web 控制台、`kubectl bmc` 插件和 MCP 接口。所有电源操作都会记录发起人身份。
 - **认证**：控制台支持 OpenID Connect 登录或内置用户名密码登录；API 和 MCP 客户端可使用 OIDC token，或 kube-bmc 所在 namespace 中 ServiceAccount 的 token。
-- **Prometheus 指标**：覆盖每个传感器，以及功耗、健康状态和 SEL 使用率。
+- **Prometheus 指标**：覆盖每个传感器，以及功耗、健康状态、硬件清单和 SEL 使用率；附带 Grafana 面板，见 [docs/grafana.md](docs/grafana.md)。
 
 ## 让 AI Agent 运维服务器
 
@@ -68,6 +76,8 @@ claude mcp add --transport http kube-bmc https://kube-bmc.example.com/mcp \
 - **操作类工具**：`locate_server`（定位灯）、`clear_sel`（清空 SEL）、`power_action`（关机、重启、断电重启、开机）
 
 Agent 的每个操作都是一个 `BMCAction`，会记录 Agent 身份和必填的原因；破坏性工具带有标注，客户端调用前会请求确认；也可以整体关闭操作功能。控制台右上角的 **"AI Agent"** 按钮提供现成的接入配置。
+
+![接入 AI Agent](docs/images/ai-agents.png)
 
 ## 安装
 
@@ -132,6 +142,7 @@ MCP 工具包括 `fleet_summary`、`list_servers`、`get_server`、`get_sensors`
 - [认证与授权](docs/authentication.md)
 - [MCP 接口](docs/mcp.md)
 - [kubectl 插件](docs/kubectl.md)
+- [Grafana 面板](docs/grafana.md)
 - [英文 README](README.md)：指标、配置与开发
 
 ## 许可证
