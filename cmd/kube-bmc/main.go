@@ -173,6 +173,7 @@ func runAgent(ctx context.Context, args []string) error {
 	leaseDuration := fs.Duration("lease-duration", 3*time.Minute, "validity of the heartbeat Lease; renewed every third of it")
 	namespace := fs.String("namespace", os.Getenv("POD_NAMESPACE"), "namespace of the heartbeat Lease (defaults to $POD_NAMESPACE)")
 	actions := fs.Bool("enable-actions", false, "execute BMCActions for this node through the local BMC interface")
+	selArchives := fs.Int("sel-archives", 3, "number of SEL archives kept for this node; older ones are deleted")
 	fs.BoolVar(actions, "enable-power-actions", false, "deprecated: use --enable-actions")
 	logLevel := fs.String("log-level", "info", "debug, info, warn or error")
 	_ = fs.Parse(args)
@@ -209,7 +210,8 @@ func runAgent(ctx context.Context, args []string) error {
 			return err
 		}
 		if err := (&controller.InBandReconciler{
-			Client: mgr.GetClient(), Node: *node, IPMI: ipmiClient, Namespace: *namespace, Enabled: true, Timeout: 5 * time.Minute,
+			Client: mgr.GetClient(), Node: *node, IPMI: ipmiClient, Namespace: *namespace, SELArchives: *selArchives,
+			Enabled: true, Timeout: 5 * time.Minute,
 		}).SetupWithManager(mgr); err != nil {
 			return err
 		}

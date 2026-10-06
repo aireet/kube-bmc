@@ -2,11 +2,13 @@ package kubectl
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"strings"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
@@ -17,6 +19,7 @@ import (
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/collector"
+	"github.com/aireet/kube-bmc/internal/controller"
 	"github.com/aireet/kube-bmc/internal/ipmi"
 )
 
@@ -237,5 +240,37 @@ func TestClearSEL(t *testing.T) {
 	}
 	if err := h.run(t, "power", "server131", "ClearSEL", "--reason", "x", "--yes"); err == nil {
 		t.Fatal("power accepted a non-power action")
+	}
+}
+
+func TestSELArchives(t *testing.T) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write([]byte("237c | 10/04/26 | 17:01:03 UTC | Session Audit #0xff |  | Asserted\n"))
+	_ = zw.Close()
+	archive := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "sel-server131-20261006-090000", Namespace: "kube-bmc-system",
+			Labels:      map[string]string{controller.SELArchiveLabel: "true", controller.BMCLabel: "server131"},
+			Annotations: map[string]string{"bmc.kube-bmc.io/entries": "1", "bmc.kube-bmc.io/requested-by": "alice", "bmc.kube-bmc.io/reason": "[kubectl] log full"},
+		},
+		BinaryData: map[string][]byte{controller.SELArchiveKey: buf.Bytes()},
+	}
+	h := newHarness(t, nil, fixtureBMC("server131", bmcv1.HealthOK), archive)
+
+	if err := h.run(t, "sel-archives", "server131"); err != nil {
+		t.Fatal(err)
+	}
+	if out := h.out.String(); !strings.Contains(out, "sel-server131-20261006-090000") || !strings.Contains(out, "[kubectl] log full") {
+		t.Fatalf("list:\n%s", out)
+	}
+	if err := h.run(t, "sel-archives", "server131", "--show", "sel-server131-20261006-090000"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.out.String(), "Session Audit #0xff") {
+		t.Fatalf("show:\n%s", h.out)
+	}
+	if err := h.run(t, "sel-archives", "server131", "--show", "missing"); err == nil {
+		t.Fatal("unknown archive accepted")
 	}
 }

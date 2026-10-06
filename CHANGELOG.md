@@ -3,6 +3,16 @@
 All notable changes to this project are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.1] - 2026-10-06
+
+### Changed
+- SEL archives are always gzip-compressed and kept per server up to
+  `server.actions.selArchivesPerServer` (default 3, agent flag `--sel-archives`); older archives
+  are deleted. Archives no longer expire with the action TTL.
+
+### Added
+- `kubectl bmc sel-archives NAME [--show ARCHIVE]` lists and prints saved System Event Logs.
+
 ## [0.3.0] - 2026-10-05
 
 ### Added

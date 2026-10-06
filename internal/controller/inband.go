@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -37,11 +39,14 @@ func InBand(a bmcv1.ActionType) bool {
 	return power || a == bmcv1.ActionIdentifyOn || a == bmcv1.ActionIdentifyOff || a == bmcv1.ActionClearSEL
 }
 
-// SELArchiveLabel marks ConfigMaps that hold System Event Logs saved by ClearSEL.
-const SELArchiveLabel = "bmc.kube-bmc.io/sel-archive"
-
-// maxConfigMapData keeps an archive below the 1 MiB object size limit.
-const maxConfigMapData = 900 << 10
+// SELArchiveLabel marks ConfigMaps that hold System Event Logs saved by ClearSEL. The
+// log is stored gzip-compressed under SELArchiveKey.
+const (
+	SELArchiveLabel = "bmc.kube-bmc.io/sel-archive"
+	SELArchiveKey   = "sel.txt.gz"
+	// BMCLabel names the BMC an object belongs to.
+	BMCLabel = "bmc.kube-bmc.io/bmc"
+)
 
 // InBandReconciler runs in the node agent and executes actions for its node through
 // /dev/ipmi0. No BMC credentials or network access to the BMC are needed.
@@ -51,6 +56,8 @@ type InBandReconciler struct {
 	IPMI   *ipmi.Client
 	// Namespace receives the SEL archives created by ClearSEL.
 	Namespace string
+	// SELArchives is the number of SEL archives kept per server; older ones are deleted.
+	SELArchives int
 	// Enabled must also be set on the server; when false, the agent leaves actions alone
 	// and the server rejects them.
 	Enabled bool
@@ -153,8 +160,9 @@ func (r *InBandReconciler) power(ctx, execCtx context.Context, a *bmcv1.BMCActio
 	return nil
 }
 
-// clearSEL saves the complete log to a ConfigMap owned by the action and clears the log
-// only after the archive was stored.
+// clearSEL saves the complete log to a compressed ConfigMap and clears the log only after
+// the archive was stored. Archives are kept per server up to SELArchives, independently of
+// the action TTL.
 func (r *InBandReconciler) clearSEL(ctx context.Context, a *bmcv1.BMCAction) (string, error) {
 	text, err := r.IPMI.SELText(ctx)
 	if err != nil {
@@ -170,34 +178,54 @@ func (r *InBandReconciler) clearSEL(ctx context.Context, a *bmcv1.BMCAction) (st
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("sel-%s-%s", r.Node, ts.Format("20060102-150405")),
 			Namespace: r.Namespace,
-			Labels:    map[string]string{SELArchiveLabel: "true", "bmc.kube-bmc.io/bmc": r.Node},
+			Labels:    map[string]string{SELArchiveLabel: "true", BMCLabel: r.Node},
 			Annotations: map[string]string{
 				"bmc.kube-bmc.io/bmcaction":    a.Name,
 				"bmc.kube-bmc.io/requested-by": a.Spec.RequestedBy,
+				"bmc.kube-bmc.io/reason":       a.Spec.Reason,
 				"bmc.kube-bmc.io/entries":      fmt.Sprint(entries),
 			},
-			// Deleted together with the action when its TTL expires.
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: bmcv1.GroupVersion.String(), Kind: "BMCAction", Name: a.Name, UID: a.UID,
-			}},
 		},
 	}
-	if len(text) <= maxConfigMapData {
-		cm.Data = map[string]string{"sel.txt": string(text)}
-	} else {
-		var buf bytes.Buffer
-		zw := gzip.NewWriter(&buf)
-		_, _ = zw.Write(text)
-		_ = zw.Close()
-		cm.BinaryData = map[string][]byte{"sel.txt.gz": buf.Bytes()}
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	_, _ = zw.Write(text)
+	if err := zw.Close(); err != nil {
+		return "", fmt.Errorf("compress the System Event Log; it was not cleared: %w", err)
 	}
+	cm.BinaryData = map[string][]byte{SELArchiveKey: buf.Bytes()}
 	if err := r.Client.Create(ctx, cm); err != nil {
 		return "", fmt.Errorf("save the System Event Log; it was not cleared: %w", err)
 	}
 	a.Status.SELArchive = r.Namespace + "/" + cm.Name
+	if err := r.pruneSELArchives(ctx); err != nil {
+		log.FromContext(ctx).Error(err, "deleting old SEL archives failed")
+	}
 
 	if err := r.IPMI.ClearSEL(ctx); err != nil {
 		return "", fmt.Errorf("clear the System Event Log (archive kept in %s): %w", a.Status.SELArchive, err)
 	}
 	return fmt.Sprintf("System Event Log cleared; %d entries saved to ConfigMap %s", entries, a.Status.SELArchive), nil
+}
+
+// pruneSELArchives deletes the oldest archives of this server beyond SELArchives. Archive
+// names end with a UTC timestamp, so they sort chronologically.
+func (r *InBandReconciler) pruneSELArchives(ctx context.Context) error {
+	var list corev1.ConfigMapList
+	if err := r.Client.List(ctx, &list, client.InNamespace(r.Namespace),
+		client.MatchingLabels{SELArchiveLabel: "true", BMCLabel: r.Node}); err != nil {
+		return err
+	}
+	keep := max(r.SELArchives, 1)
+	if len(list.Items) <= keep {
+		return nil
+	}
+	slices.SortFunc(list.Items, func(a, b corev1.ConfigMap) int { return strings.Compare(a.Name, b.Name) })
+	var errs []error
+	for i := range list.Items[:len(list.Items)-keep] {
+		if err := r.Client.Delete(ctx, &list.Items[i]); client.IgnoreNotFound(err) != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }

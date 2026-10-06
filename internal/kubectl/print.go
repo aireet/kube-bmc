@@ -9,10 +9,12 @@ import (
 	"text/tabwriter"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/duration"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/collector"
+	"github.com/aireet/kube-bmc/internal/controller"
 	"github.com/aireet/kube-bmc/internal/ipmi"
 )
 
@@ -251,6 +253,23 @@ func printEvents(w io.Writer, snap *collector.Snapshot, limit int, grep string) 
 	if n == 0 {
 		fmt.Fprintln(w, "No matching events.")
 	}
+}
+
+func printArchives(w io.Writer, items []corev1.ConfigMap) {
+	if len(items) == 0 {
+		fmt.Fprintln(w, "No SEL archives found.")
+		return
+	}
+	slices.SortFunc(items, func(a, b corev1.ConfigMap) int { return strings.Compare(b.Name, a.Name) })
+	t := newTable(w)
+	fmt.Fprintln(t, "NAME\tAGE\tENTRIES\tSIZE\tREQUESTED-BY\tREASON")
+	for _, cm := range items {
+		a := cm.Annotations
+		fmt.Fprintf(t, "%s\t%s\t%s\t%d KiB\t%s\t%s\n", cm.Name, age(cm.CreationTimestamp.Time),
+			orDash(a["bmc.kube-bmc.io/entries"]), (len(cm.BinaryData[controller.SELArchiveKey])+1023)/1024,
+			orDash(a["bmc.kube-bmc.io/requested-by"]), orDash(a["bmc.kube-bmc.io/reason"]))
+	}
+	_ = t.Flush()
 }
 
 func phaseText(p bmcv1.ActionPhase, color bool) string {

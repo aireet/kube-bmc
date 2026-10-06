@@ -49,8 +49,11 @@ server:
   actions:
     enabled: false
     timeout: 2m
-    # How long finished BMCActions, and the SEL archives created by ClearSEL, are kept.
+    # How long finished BMCActions are kept.
     ttl: 168h
+    # ClearSEL saves the log to a compressed ConfigMap first. This many archives are kept per
+    # server; older ones are deleted.
+    selArchivesPerServer: 3
   # Deprecated: use server.actions. powerActions.enabled=true still enables actions.
   powerActions:
     enabled: false

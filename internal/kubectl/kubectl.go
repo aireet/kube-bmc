@@ -8,6 +8,8 @@ package kubectl
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -33,6 +35,7 @@ import (
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 	"github.com/aireet/kube-bmc/internal/agent"
 	"github.com/aireet/kube-bmc/internal/collector"
+	"github.com/aireet/kube-bmc/internal/controller"
 )
 
 // Clients is what the commands need from the cluster.
@@ -86,7 +89,8 @@ func NewCommand(streams genericiooptions.IOStreams, version string, clients *Cli
 	root.PersistentFlags().StringVar(&o.namespace, "kube-bmc-namespace", "kube-bmc-system", "namespace where kube-bmc is installed")
 	root.PersistentFlags().BoolVar(&o.color, "color", true, "colorize output when writing to a terminal")
 
-	root.AddCommand(o.listCmd(), o.describeCmd(), o.sensorsCmd(), o.eventsCmd(), o.powerCmd(), o.locateCmd(), o.clearSELCmd(), o.actionsCmd(),
+	root.AddCommand(o.listCmd(), o.describeCmd(), o.sensorsCmd(), o.eventsCmd(), o.powerCmd(), o.locateCmd(), o.clearSELCmd(),
+		o.selArchivesCmd(), o.actionsCmd(),
 		&cobra.Command{
 			Use:   "version",
 			Short: "Print the plugin version",
@@ -448,6 +452,47 @@ func (o *options) clearSELCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	cmd.Flags().DurationVar(&timeout, "timeout", 5*time.Minute, "how long to wait for the result")
 	return cmd
+}
+
+func (o *options) selArchivesCmd() *cobra.Command {
+	var show string
+	cmd := &cobra.Command{
+		Use:   "sel-archives NAME",
+		Short: "List the System Event Logs saved by clear-sel, or print one with --show",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := o.clients()
+			if err != nil {
+				return err
+			}
+			var list corev1.ConfigMapList
+			if err := c.Client.List(cmd.Context(), &list, client.InNamespace(o.namespace),
+				client.MatchingLabels{controller.SELArchiveLabel: "true", controller.BMCLabel: args[0]}); err != nil {
+				return err
+			}
+			if show != "" {
+				for _, cm := range list.Items {
+					if cm.Name == show {
+						return printArchive(o.streams.Out, &cm)
+					}
+				}
+				return fmt.Errorf("no SEL archive %q for %s", show, args[0])
+			}
+			printArchives(o.streams.Out, list.Items)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&show, "show", "", "print the log saved in this archive")
+	return cmd
+}
+
+func printArchive(w io.Writer, cm *corev1.ConfigMap) error {
+	zr, err := gzip.NewReader(bytes.NewReader(cm.BinaryData[controller.SELArchiveKey]))
+	if err != nil {
+		return fmt.Errorf("archive %s: %w", cm.Name, err)
+	}
+	_, err = io.Copy(w, zr)
+	return err
 }
 
 func (o *options) waitAction(ctx context.Context, c client.Client, name string, timeout time.Duration) error {

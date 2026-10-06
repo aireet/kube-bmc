@@ -1,13 +1,18 @@
 package controller
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
+	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,7 +54,7 @@ func inBand(t *testing.T, enabled bool, objs ...client.Object) (*InBandReconcile
 	t.Helper()
 	f := newFixture(t, true, objs...)
 	rec := &ipmiRecorder{c: f.c, fail: map[string]error{}}
-	return &InBandReconciler{Client: f.c, Node: "gpu-01", IPMI: ipmi.NewClient(rec, ""), Namespace: ns,
+	return &InBandReconciler{Client: f.c, Node: "gpu-01", IPMI: ipmi.NewClient(rec, ""), Namespace: ns, SELArchives: 3,
 		Enabled: enabled, Timeout: time.Minute, Now: func() time.Time { return f.now }}, rec, f
 }
 
@@ -164,9 +169,16 @@ func TestClearSELArchivesFirst(t *testing.T) {
 	var cms corev1.ConfigMapList
 	_ = f.c.List(context.Background(), &cms)
 	cm := cms.Items[0]
-	if cm.Namespace != ns || cm.Labels[SELArchiveLabel] != "true" || cm.Annotations["bmc.kube-bmc.io/entries"] != "2" ||
-		cm.Data["sel.txt"] != rec.sel || cm.OwnerReferences[0].UID != "action-uid" {
+	if cm.Namespace != ns || cm.Labels[SELArchiveLabel] != "true" || cm.Labels[BMCLabel] != "gpu-01" ||
+		cm.Annotations["bmc.kube-bmc.io/entries"] != "2" || cm.Annotations["bmc.kube-bmc.io/reason"] != "maintenance" {
 		t.Fatalf("archive = %+v", cm)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(cm.BinaryData[SELArchiveKey]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text, _ := io.ReadAll(zr); string(text) != rec.sel {
+		t.Fatalf("archived log = %q", text)
 	}
 	got := f.action("a1")
 	if got.Status.Phase != bmcv1.PhaseSucceeded || got.Status.SELArchive != ns+"/"+cm.Name ||
@@ -184,5 +196,29 @@ func TestClearSELKeepsLogWhenReadFails(t *testing.T) {
 	}
 	if a := f.action("a1"); a.Status.Phase != bmcv1.PhaseFailed || !strings.Contains(a.Status.Message, "it was not cleared") {
 		t.Fatalf("status = %+v", a.Status)
+	}
+}
+
+func TestClearSELKeepsNewestArchives(t *testing.T) {
+	archive := func(node, ts string) *corev1.ConfigMap {
+		return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name: "sel-" + node + "-" + ts, Namespace: ns, Labels: map[string]string{SELArchiveLabel: "true", BMCLabel: node},
+		}}
+	}
+	r, _, f := inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionClearSEL),
+		archive("gpu-01", "20261001-080000"), archive("gpu-01", "20261002-080000"), archive("gpu-01", "20261003-080000"),
+		archive("gpu-02", "20260901-080000"))
+	reconcileInBand(t, r)
+
+	var cms corev1.ConfigMapList
+	_ = f.c.List(context.Background(), &cms)
+	var names []string
+	for _, cm := range cms.Items {
+		names = append(names, cm.Name)
+	}
+	slices.Sort(names)
+	want := "sel-gpu-01-20261002-080000,sel-gpu-01-20261003-080000,sel-gpu-01-20261005-120000,sel-gpu-02-20260901-080000"
+	if got := strings.Join(names, ","); got != want {
+		t.Fatalf("archives = %s", got)
 	}
 }

@@ -170,7 +170,7 @@ Who executes an action depends on whether it can be done from the node itself:
 |---|---|---|
 | `GracefulShutdown`, `ForceOff`, `ForceRestart`, `PowerCycle` | The agent on the target node, through `/dev/ipmi0` | None; no BMC credentials or BMC network access |
 | `IdentifyOn`, `IdentifyOff` | The agent on the target node | None. The light stays on until `IdentifyOff`; BMCs without indefinite identify keep it on for 255 seconds. |
-| `ClearSEL` | The agent on the target node | None. The complete log is first saved to a ConfigMap (`status.selArchive`), and cleared only if that succeeded. |
+| `ClearSEL` | The agent on the target node | None. The complete log is first saved to a compressed ConfigMap (`status.selArchive`), and cleared only if that succeeded. The newest `server.actions.selArchivesPerServer` archives (default 3) are kept per server. |
 | `On`, `GracefulRestart` | The server, out-of-band over Redfish or IPMI-over-LAN | BMC credentials and network access from the server to the BMC |
 
 If the agent does not claim a power action within 30 seconds, because the node is down, the
@@ -185,11 +185,11 @@ helm upgrade kube-bmc oci://ghcr.io/aireet/charts/kube-bmc -n kube-bmc-system --
   --set server.actions.enabled=true
 ```
 
-SEL archives can be read with:
+SEL archives can be listed and read with the kubectl plugin:
 
 ```bash
-kubectl -n kube-bmc-system get configmaps -l bmc.kube-bmc.io/sel-archive
-kubectl -n kube-bmc-system get configmap <name> -o jsonpath='{.data.sel\.txt}'
+kubectl bmc sel-archives host002
+kubectl bmc sel-archives host002 --show sel-host002-20261006-090000
 ```
 
 For power on, also provide BMC credentials, and make sure the server can reach the BMC network:
@@ -203,8 +203,9 @@ helm upgrade kube-bmc oci://ghcr.io/aireet/charts/kube-bmc -n kube-bmc-system --
 
 The BMC address is discovered in-band. To override it, or to use per-server credentials or IPMI
 instead of Redfish, edit the `BMC` spec (see [examples/bmc-override.yaml](examples/bmc-override.yaml)).
-Finished actions and their SEL archives are deleted after `server.actions.ttl` (seven days by
-default).
+Finished actions are deleted after `server.actions.ttl` (seven days by default). `BMCAction`
+objects are about 1 KB and only created on request; SEL archives are gzip-compressed, typically a
+few tens of KB.
 
 ## Authentication
 

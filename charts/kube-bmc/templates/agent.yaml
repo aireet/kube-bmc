@@ -46,10 +46,10 @@ rules:
     resources: ["leases"]
     verbs: ["get", "create", "update"]
   {{- if include "kube-bmc.actionsEnabled" . }}
-  # SEL archives created by ClearSEL.
+  # SEL archives created by ClearSEL; the agent deletes its own archives beyond the limit.
   - apiGroups: [""]
     resources: ["configmaps"]
-    verbs: ["create"]
+    verbs: ["create", "list", "delete"]
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -128,6 +128,7 @@ spec:
             - --cache-dir=/cache
             {{- if include "kube-bmc.actionsEnabled" . }}
             - --enable-actions
+            - {{ printf "--sel-archives=%v" (.Values.server.actions.selArchivesPerServer) | quote }}
             {{- end }}
             - --log-level={{ .Values.agent.logLevel }}
           env:
