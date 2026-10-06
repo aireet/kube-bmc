@@ -20,6 +20,10 @@ import (
 )
 
 // Snapshot is the collected state of a BMC. The agent serves it on /api/v1/snapshot.
+//
+// A failed collection phase never overwrites data read earlier: each field holds the
+// result of the last successful read, and Errors records the phases whose latest attempt
+// failed.
 type Snapshot struct {
 	Node        string                     `json:"node"`
 	CollectedAt time.Time                  `json:"collectedAt"`
@@ -178,9 +182,15 @@ func (c *Collector) inventory(ctx context.Context) {
 	t := c.opts.CommandTimeout
 	c.step(ctx, "mc", t, func(ctx context.Context) error {
 		mc, err := c.client.MCInfo(ctx)
-		guid, _ := c.client.GUID(ctx)
-		c.set(func(s *Snapshot) { s.MC, s.GUID = mc, guid })
-		return err
+		if err != nil {
+			return err
+		}
+		c.set(func(s *Snapshot) { s.MC = mc })
+		// Not every BMC implements Get System GUID, so a failure is not an error.
+		if guid, err := c.client.GUID(ctx); err == nil && guid != "" {
+			c.set(func(s *Snapshot) { s.GUID = guid })
+		}
+		return nil
 	})
 	c.step(ctx, "lan", t, func(ctx context.Context) error {
 		lan, err := c.client.LAN(ctx)
@@ -191,15 +201,22 @@ func (c *Collector) inventory(ctx context.Context) {
 	})
 	c.step(ctx, "fru", t, func(ctx context.Context) error {
 		fru, err := c.client.FRU(ctx)
-		c.set(func(s *Snapshot) { s.FRU = fru })
+		if err == nil {
+			c.set(func(s *Snapshot) { s.FRU = fru })
+		}
 		return err
 	})
 	if c.opts.Hardware != nil {
 		c.step(ctx, "hardware", t, func(ctx context.Context) error {
 			inv, err := c.opts.Hardware(ctx)
-			if inv.CPU.Sockets > 0 || len(inv.PCIeSlots) > 0 || len(inv.GPUs) > 0 {
-				c.set(func(s *Snapshot) { s.Hardware = &inv })
-			}
+			c.set(func(s *Snapshot) {
+				if err != nil && s.Hardware != nil {
+					inv = inv.Merge(*s.Hardware)
+				}
+				if inv.CPU.Sockets > 0 || len(inv.PCIeSlots) > 0 || len(inv.GPUs) > 0 {
+					s.Hardware = &inv
+				}
+			})
 			return err
 		})
 	}
@@ -223,7 +240,9 @@ func (c *Collector) fast(ctx context.Context) {
 	})
 	c.step(ctx, "power", t, func(ctx context.Context) error {
 		w, err := c.client.Power(ctx)
-		c.set(func(s *Snapshot) { s.PowerWatts = w })
+		if err == nil {
+			c.set(func(s *Snapshot) { s.PowerWatts = w })
+		}
 		return err
 	})
 	c.step(ctx, "sensors", t, func(ctx context.Context) error {

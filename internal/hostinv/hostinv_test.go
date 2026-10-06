@@ -178,3 +178,17 @@ func TestCollectSlotAddressIsCard(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeKeepsSectionsThatCouldNotBeRead(t *testing.T) {
+	prev := Inventory{
+		CPU:       CPU{Model: "Xeon", Sockets: 2},
+		Memory:    Memory{TotalGiB: 512},
+		GPUs:      []PCIDevice{{Address: "0000:01:00.0"}},
+		PCIeSlots: []Slot{{Name: "PCIE1", InUse: true}},
+	}
+	// dmidecode failed: only lspci data is present.
+	got := Inventory{GPUs: []PCIDevice{{Address: "0000:02:00.0"}}}.Merge(prev)
+	if got.CPU != prev.CPU || got.Memory != prev.Memory || len(got.PCIeSlots) != 1 || got.GPUs[0].Address != "0000:02:00.0" {
+		t.Fatalf("merged = %+v", got)
+	}
+}

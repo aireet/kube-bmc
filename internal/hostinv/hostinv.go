@@ -24,6 +24,25 @@ type Inventory struct {
 	PCIeSlots []Slot      `json:"pcieSlots,omitempty"`
 }
 
+// Merge returns inv with every section that is empty taken from prev. Collect returns a
+// partial inventory when one of its sources fails; merging keeps the last known value of
+// the failed sections instead of dropping them.
+func (inv Inventory) Merge(prev Inventory) Inventory {
+	if inv.CPU == (CPU{}) {
+		inv.CPU = prev.CPU
+	}
+	if inv.Memory == (Memory{}) {
+		inv.Memory = prev.Memory
+	}
+	if len(inv.GPUs) == 0 {
+		inv.GPUs = prev.GPUs
+	}
+	if len(inv.PCIeSlots) == 0 {
+		inv.PCIeSlots = prev.PCIeSlots
+	}
+	return inv
+}
+
 // CPU summarizes the processors.
 type CPU struct {
 	Model   string `json:"model,omitempty"`
