@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.4.1] - 2026-10-06
 
 ### Fixed
 - PCIe slots on servers whose firmware reports the installed card, not the port above the slot,
