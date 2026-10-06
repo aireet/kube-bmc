@@ -213,6 +213,9 @@ func sizeGiB(s string) int {
 var (
 	slotGeneration = regexp.MustCompile(`PCI Express\s+(\d)\b`)
 	slotWidth      = regexp.MustCompile(`\bx(\d+)\b`)
+	// slotSpec matches a link description repeated in the designation, as in
+	// "SLOT1 PCI-E 4.0 X16"; generation and width are reported separately.
+	slotSpec = regexp.MustCompile(`(?i)^(\S+)\s+PCI-?E\b.*$`)
 )
 
 // ParseSlots parses `dmidecode -t slot` and returns the PCIe slots.
@@ -223,7 +226,7 @@ func ParseSlots(out []byte) []Slot {
 		if !strings.Contains(t, "PCI Express") {
 			continue
 		}
-		s := Slot{Name: b["Designation"], InUse: b["Current Usage"] == "In Use", BusAddress: strings.ToLower(b["Bus Address"])}
+		s := Slot{Name: slotSpec.ReplaceAllString(b["Designation"], "$1"), InUse: b["Current Usage"] == "In Use", BusAddress: strings.ToLower(b["Bus Address"])}
 		if m := slotGeneration.FindStringSubmatch(t); m != nil {
 			s.Generation = "Gen" + m[1]
 		}
@@ -303,8 +306,10 @@ func isEndpoint(d PCIDevice) bool {
 	return !strings.HasPrefix(classCode(d.Class), "06")
 }
 
-// assignSlots finds the devices behind each slot through the sysfs topology: a device
-// belongs to a slot when the slot's bus address appears in its device path.
+// assignSlots finds the devices behind each slot through the sysfs topology. Firmware
+// reports either the port above the slot or the card itself as the slot's bus address, so a
+// device belongs to a slot when the address is one of its upstream bridges, or when the
+// device is a function of the card at that address.
 func assignSlots(slots []Slot, devices []PCIDevice, resolve Resolver) ([]Slot, []PCIDevice) {
 	if resolve == nil {
 		return slots, devices
@@ -315,7 +320,7 @@ func assignSlots(slots []Slot, devices []PCIDevice, resolve Resolver) ([]Slot, [
 			continue
 		}
 		for _, s := range slots {
-			if s.BusAddress != "" && s.BusAddress != devices[i].Address && strings.Contains(path, "/"+s.BusAddress+"/") {
+			if s.BusAddress != "" && inSlot(s.BusAddress, devices[i], path) {
 				devices[i].Slot = s.Name
 				break
 			}
@@ -331,6 +336,15 @@ func assignSlots(slots []Slot, devices []PCIDevice, resolve Resolver) ([]Slot, [
 		}
 	}
 	return slots, devices
+}
+
+func inSlot(slot string, d PCIDevice, path string) bool {
+	if d.Address != slot && strings.Contains(path, "/"+slot+"/") {
+		return true
+	}
+	// The card at the slot address, or another function of it.
+	card := func(a string) string { return a[:max(strings.LastIndexByte(a, '.'), 0)] }
+	return isEndpoint(d) && card(d.Address) != "" && card(d.Address) == card(slot)
 }
 
 var digits = regexp.MustCompile(`\d+|\D+`)

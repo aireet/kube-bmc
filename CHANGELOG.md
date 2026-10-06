@@ -3,6 +3,13 @@
 All notable changes to this project are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- PCIe slots on servers whose firmware reports the installed card, not the port above the slot,
+  as the slot's bus address (seen on AMD EPYC boards) showed no device. Slot names no longer
+  repeat the link description, e.g. `SLOT1` instead of `SLOT1 PCI-E 4.0 X16`.
+
 ## [0.4.0] - 2026-10-06
 
 ### Added

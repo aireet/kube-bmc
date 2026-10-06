@@ -1,0 +1,144 @@
+# dmidecode 3.7
+Getting SMBIOS data from sysfs.
+SMBIOS 3.2.0 present.
+
+Handle 0x000A, DMI type 9, 17 bytes
+System Slot Information
+	Designation: SLOT1 PCI-E 4.0 X16
+	Type: PCI Express 4 x16
+	Data Bus Width: 16x or x16
+	Current Usage: In Use
+	Length: Long
+	ID: 1
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:e1:00.0
+
+Handle 0x000B, DMI type 9, 17 bytes
+System Slot Information
+	Designation: SLOT2 PCI-E 4.0 X16
+	Type: PCI Express 4 x16
+	Data Bus Width: 16x or x16
+	Current Usage: In Use
+	Length: Long
+	ID: 2
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:c1:00.0
+
+Handle 0x000C, DMI type 9, 17 bytes
+System Slot Information
+	Designation: SLOT3 PCI-E 4.0 X16
+	Type: PCI Express 4 x16
+	Data Bus Width: 16x or x16
+	Current Usage: In Use
+	Length: Long
+	ID: 3
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:81:00.0
+
+Handle 0x000D, DMI type 9, 17 bytes
+System Slot Information
+	Designation: SLOT4 PCI-E 4.0 X16
+	Type: PCI Express 4 x16
+	Data Bus Width: 16x or x16
+	Current Usage: In Use
+	Length: Long
+	ID: 4
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:a1:00.0
+
+Handle 0x000E, DMI type 9, 17 bytes
+System Slot Information
+	Designation: SLOT5 PCI-E 4.0 X16
+	Type: PCI Express 4 x16
+	Data Bus Width: 16x or x16
+	Current Usage: In Use
+	Length: Long
+	ID: 5
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:c2:00.0
+
+Handle 0x000F, DMI type 9, 17 bytes
+System Slot Information
+	Designation: SLOT6 PCI-E 4.0 X16
+	Type: PCI Express 4 x16
+	Data Bus Width: 16x or x16
+	Current Usage: In Use
+	Length: Long
+	ID: 6
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:c3:00.0
+
+Handle 0x0010, DMI type 9, 17 bytes
+System Slot Information
+	Designation: SLOT7 PCI-E 4.0 X16
+	Type: PCI Express 4 x16
+	Data Bus Width: 16x or x16
+	Current Usage: In Use
+	Length: Long
+	ID: 7
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:61:00.0
+
+Handle 0x0011, DMI type 9, 17 bytes
+System Slot Information
+	Designation: SLOT8 PCI-E 4.0 X16
+	Type: PCI Express 4 x16
+	Data Bus Width: 16x or x16
+	Current Usage: In Use
+	Length: Long
+	ID: 8
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:41:00.0
+
+Handle 0x0012, DMI type 9, 17 bytes
+System Slot Information
+	Designation: SLOT9 PCI-E 4.0 X16
+	Type: PCI Express 4 x16
+	Data Bus Width: 16x or x16
+	Current Usage: In Use
+	Length: Long
+	ID: 9
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:01:00.0
+
+Handle 0x0013, DMI type 9, 17 bytes
+System Slot Information
+	Designation: SLOT10 PCI-E 4.0 X16
+	Type: PCI Express 4 x16
+	Data Bus Width: 16x or x16
+	Current Usage: In Use
+	Length: Long
+	ID: 10
+	Characteristics:
+		3.3 V is provided
+		Opening is shared
+		PME signal is supported
+	Bus Address: 0000:25:00.0
+

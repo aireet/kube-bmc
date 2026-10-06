@@ -133,3 +133,48 @@ func TestParseSlotsNewerDmidecode(t *testing.T) {
 		t.Fatalf("slots = %+v", slots)
 	}
 }
+
+// The epyc fixtures come from a server whose firmware reports the card itself, not the port
+// above it, as the slot's bus address. All ten slots are populated: eight GPUs, a RAID
+// controller and a network adapter.
+func TestCollectSlotAddressIsCard(t *testing.T) {
+	paths := map[string]string{}
+	for _, line := range strings.Split(string(fixture(t, "epyc/sysfs_paths.txt")), "\n") {
+		if addr, path, ok := strings.Cut(line, " "); ok {
+			paths[addr] = path
+		}
+	}
+	resolve := func(addr string) (string, error) {
+		if p, ok := paths[addr]; ok {
+			return p, nil
+		}
+		return "", errors.New("not found")
+	}
+	files := map[string]string{"dmidecode -t slot": "epyc/dmidecode_slot.txt", "lspci -mm -nn -D": "epyc/lspci.txt"}
+	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if f, ok := files[name+" "+strings.Join(args, " ")]; ok {
+			return fixture(t, f), nil
+		}
+		return nil, errors.New("not available")
+	}
+	inv, _ := Collect(context.Background(), run, resolve)
+	if len(inv.PCIeSlots) != 10 {
+		t.Fatalf("slots = %d", len(inv.PCIeSlots))
+	}
+	devices := map[string]string{}
+	for _, s := range inv.PCIeSlots {
+		if !s.InUse || s.Device == "" {
+			t.Errorf("%s: in use %v, device %q", s.Name, s.InUse, s.Device)
+		}
+		devices[s.Name] = s.Device
+	}
+	if !strings.Contains(devices["SLOT9"], "RTX 4090") || !strings.Contains(devices["SLOT5"], "MegaRAID") ||
+		!strings.Contains(devices["SLOT6"], "ConnectX-4") {
+		t.Fatalf("devices = %v", devices)
+	}
+	for _, g := range inv.GPUs {
+		if g.Slot == "" {
+			t.Errorf("gpu %s has no slot", g.Address)
+		}
+	}
+}
