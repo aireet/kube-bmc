@@ -128,7 +128,7 @@ func describe(w io.Writer, b *bmcv1.BMC, actions []bmcv1.BMCAction, color bool) 
 		}
 		line("PCIe slots", fmt.Sprintf("%d of %d in use", used, len(h.PCIeSlots)))
 		for _, sl := range slots {
-			line("", "  "+sl)
+			fmt.Fprintf(t, "\t  %s\n", sl)
 		}
 	}
 	line("BMC firmware", fmt.Sprintf("%s (IPMI %s, IANA %s)", orDash(s.Controller.FirmwareVersion), orDash(s.Controller.IPMIVersion), orDash(s.Controller.ManufacturerID)))
