@@ -272,3 +272,22 @@ func TestLeaseExpired(t *testing.T) {
 		t.Fatal("expired lease reported valid")
 	}
 }
+
+func TestForgetSELProblems(t *testing.T) {
+	w := &statusWriter{}
+	now := time.Now()
+	problems := []bmcv1.Problem{
+		{Severity: bmcv1.HealthCritical, Source: "FAN3"},
+		{Severity: bmcv1.HealthWarning, Source: "security"},
+		{Severity: bmcv1.HealthWarning, Source: "sel"},
+		{Severity: bmcv1.HealthWarning, Source: "SEL_Status"},
+	}
+	w.debounce(problems, bmcv1.HealthCritical, now)
+
+	// The log was cleared: SEL problems disappear at once, others keep their clear delay.
+	w.forget(selProblemSources...)
+	got, _ := w.debounce(nil, bmcv1.HealthOK, now.Add(time.Minute))
+	if len(got) != 1 || got[0].Source != "FAN3" {
+		t.Fatalf("problems = %+v", got)
+	}
+}

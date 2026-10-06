@@ -58,6 +58,8 @@ type InBandReconciler struct {
 	Namespace string
 	// SELArchives is the number of SEL archives kept per server; older ones are deleted.
 	SELArchives int
+	// OnSELCleared is called after the System Event Log was cleared.
+	OnSELCleared func()
 	// Enabled must also be set on the server; when false, the agent leaves actions alone
 	// and the server rejects them.
 	Enabled bool
@@ -204,6 +206,9 @@ func (r *InBandReconciler) clearSEL(ctx context.Context, a *bmcv1.BMCAction) (st
 
 	if err := r.IPMI.ClearSEL(ctx); err != nil {
 		return "", fmt.Errorf("clear the System Event Log (archive kept in %s): %w", a.Status.SELArchive, err)
+	}
+	if r.OnSELCleared != nil {
+		r.OnSELCleared()
 	}
 	return fmt.Sprintf("System Event Log cleared; %d entries saved to ConfigMap %s", entries, a.Status.SELArchive), nil
 }

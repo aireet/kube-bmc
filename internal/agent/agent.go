@@ -46,6 +46,8 @@ type Agent struct {
 	log    *slog.Logger
 	status *statusWriter
 	lease  *heartbeat
+	// selCleared is signalled after a ClearSEL action, see SELCleared.
+	selCleared chan struct{}
 }
 
 var statusWrites = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -56,8 +58,19 @@ var statusWrites = prometheus.NewCounterVec(prometheus.CounterOpts{
 func New(k8s client.Client, col *collector.Collector, opts Options, log *slog.Logger) *Agent {
 	return &Agent{
 		k8s: k8s, col: col, opts: opts, log: log,
-		status: &statusWriter{k8s: k8s, node: opts.NodeName, version: opts.Version, refresh: opts.StatusRefresh, log: log},
-		lease:  &heartbeat{k8s: k8s, namespace: opts.Namespace, node: opts.NodeName, duration: opts.LeaseDuration},
+		status:     &statusWriter{k8s: k8s, node: opts.NodeName, version: opts.Version, refresh: opts.StatusRefresh, log: log},
+		lease:      &heartbeat{k8s: k8s, namespace: opts.Namespace, node: opts.NodeName, duration: opts.LeaseDuration},
+		selCleared: make(chan struct{}, 1),
+	}
+}
+
+// SELCleared tells the agent that the System Event Log was cleared on purpose. Problems
+// derived from the log are dropped at once instead of after the usual clear delay, and
+// the log is read again immediately. It is safe to call from any goroutine.
+func (a *Agent) SELCleared() {
+	select {
+	case a.selCleared <- struct{}{}:
+	default:
 	}
 }
 
@@ -86,6 +99,9 @@ func (a *Agent) Run(ctx context.Context) error {
 			if err := a.sync(ctx); err != nil {
 				a.log.Error("status sync failed", "err", err)
 			}
+		case <-a.selCleared:
+			a.status.forget(selProblemSources...)
+			a.col.Refresh()
 		case <-renew.C:
 			if !a.col.Fresh(a.opts.MaxCollectionAge) {
 				continue // a stalled collector must not look alive

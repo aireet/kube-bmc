@@ -13,6 +13,11 @@ All notable changes to this project are documented in this file. The format foll
 ### Added
 - `kubectl bmc sel-archives NAME [--show ARCHIVE]` lists and prints saved System Event Logs.
 
+### Fixed
+- After ClearSEL, the problems derived from the log (SEL full, failed BMC logins) are removed
+  immediately and the log is read again at once, instead of after the 5-minute clear delay and
+  the SEL read interval.
+
 ## [0.3.0] - 2026-10-05
 
 ### Added

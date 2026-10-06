@@ -55,6 +55,7 @@ type Collector struct {
 	selSeenAt string // SEL "Last Add Time" at the last read
 	selBusy   bool
 	updates   chan struct{}
+	refresh   chan struct{}
 	// described caches decoded descriptions of SEL entries. Entries are immutable, so the
 	// key only has to distinguish reused record IDs after the log was cleared.
 	described map[string]string
@@ -70,6 +71,7 @@ func New(node string, client *ipmi.Client, opts Options, log *slog.Logger) *Coll
 		log:       log,
 		snap:      Snapshot{Node: node, PowerWatts: -1, Errors: map[string]string{}},
 		updates:   make(chan struct{}, 1),
+		refresh:   make(chan struct{}, 1),
 		described: map[string]string{},
 	}
 }
@@ -95,6 +97,15 @@ func (c *Collector) Snapshot() Snapshot {
 		s.Errors[k] = v
 	}
 	return s
+}
+
+// Refresh requests an immediate collection round that also re-reads the SEL, for example
+// after the log was cleared.
+func (c *Collector) Refresh() {
+	select {
+	case c.refresh <- struct{}{}:
+	default:
+	}
 }
 
 // Fresh reports whether a collection round completed within maxAge.
@@ -125,6 +136,11 @@ func (c *Collector) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-fast.C:
+			c.fast(ctx)
+		case <-c.refresh:
+			c.mu.Lock()
+			c.snap.Events, c.selReadAt, c.selSeenAt = nil, time.Time{}, ""
+			c.mu.Unlock()
 			c.fast(ctx)
 		case <-inv.C:
 			c.step(ctx, "sdr-cache", c.opts.SELTimeout, func(ctx context.Context) error { return c.client.RefreshSDRCache(ctx) })

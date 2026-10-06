@@ -198,6 +198,16 @@ func runAgent(ctx context.Context, args []string) error {
 		return err
 	}
 	ipmiClient := ipmi.NewClient(ipmi.Exec{Path: *ipmitool}, *cacheDir)
+	col := collector.New(*node, ipmiClient, collector.Options{
+		Interval: *interval, InventoryInterval: *invInterval, SELMinInterval: *selInterval, SELEntries: *selEntries,
+		CommandTimeout: 30 * time.Second, SELTimeout: 3 * time.Minute,
+	}, log)
+
+	log.Info("starting agent", "version", version, "actions", *actions)
+	ag := agent.New(k8s, col, agent.Options{
+		NodeName: *node, Namespace: *namespace, Listen: *listen, LeaseDuration: *leaseDuration,
+		StatusRefresh: *statusRefresh, MaxCollectionAge: 3**interval + 30*time.Second, Version: version,
+	}, log)
 	if *actions {
 		// The manager watches BMCActions only; everything else is read directly.
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
@@ -210,27 +220,18 @@ func runAgent(ctx context.Context, args []string) error {
 			return err
 		}
 		if err := (&controller.InBandReconciler{
-			Client: mgr.GetClient(), Node: *node, IPMI: ipmiClient, Namespace: *namespace, SELArchives: *selArchives,
+			Client: mgr.GetClient(), Node: *node, IPMI: ipmiClient, Namespace: *namespace, SELArchives: *selArchives, OnSELCleared: ag.SELCleared,
 			Enabled: true, Timeout: 5 * time.Minute,
 		}).SetupWithManager(mgr); err != nil {
 			return err
 		}
 		go func() {
 			if err := mgr.Start(ctx); err != nil {
-				log.Error("power action controller stopped", "err", err)
+				log.Error("action controller stopped", "err", err)
 			}
 		}()
 	}
-	col := collector.New(*node, ipmiClient, collector.Options{
-		Interval: *interval, InventoryInterval: *invInterval, SELMinInterval: *selInterval, SELEntries: *selEntries,
-		CommandTimeout: 30 * time.Second, SELTimeout: 3 * time.Minute,
-	}, log)
-
-	log.Info("starting agent", "version", version, "actions", *actions)
-	return agent.New(k8s, col, agent.Options{
-		NodeName: *node, Namespace: *namespace, Listen: *listen, LeaseDuration: *leaseDuration,
-		StatusRefresh: *statusRefresh, MaxCollectionAge: 3**interval + 30*time.Second, Version: version,
-	}, log).Run(ctx)
+	return ag.Run(ctx)
 }
 
 func runServer(ctx context.Context, args []string) error {

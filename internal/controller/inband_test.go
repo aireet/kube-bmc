@@ -158,7 +158,12 @@ func TestClearSELArchivesFirst(t *testing.T) {
 	a.UID = "action-uid"
 	r, rec, f := inBand(t, true, bmc("gpu-01"), a)
 	rec.sel = "237b | 10/04/26 | 17:01:03 UTC | Session Audit #0xff |  | Asserted\n237c | 10/04/26 | 17:01:03 UTC | Session Audit #0xff |  | Asserted\n"
+	cleared := 0
+	r.OnSELCleared = func() { cleared++ }
 	reconcileInBand(t, r)
+	if cleared != 1 {
+		t.Fatalf("OnSELCleared called %d times", cleared)
+	}
 
 	if strings.Join(rec.calls, ",") != "sel elist,sel clear" {
 		t.Fatalf("calls = %v", rec.calls)
@@ -190,6 +195,7 @@ func TestClearSELArchivesFirst(t *testing.T) {
 func TestClearSELKeepsLogWhenReadFails(t *testing.T) {
 	r, rec, f := inBand(t, true, bmc("gpu-01"), action("a1", "gpu-01", bmcv1.ActionClearSEL))
 	rec.fail["sel elist"] = errors.New("Could not open device at /dev/ipmi0")
+	r.OnSELCleared = func() { t.Fatal("OnSELCleared called although the log was not cleared") }
 	reconcileInBand(t, r)
 	if strings.Join(rec.calls, ",") != "sel elist" {
 		t.Fatalf("calls = %v", rec.calls)

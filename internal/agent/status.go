@@ -94,6 +94,18 @@ func (w *statusWriter) write(ctx context.Context, snap *collector.Snapshot, node
 	return nil
 }
 
+// selProblemSources are the problem sources derived from the System Event Log.
+var selProblemSources = []string{"sel", "security", "SEL_Status"}
+
+// forget drops the remembered problems of the given sources.
+func (w *statusWriter) forget(sources ...string) {
+	for k := range w.problemSeen {
+		if slices.Contains(sources, k.source) {
+			delete(w.problemSeen, k)
+		}
+	}
+}
+
 // debounce keeps problems that disappeared less than problemClearDelay ago and raises
 // health accordingly.
 func (w *statusWriter) debounce(current []bmcv1.Problem, health bmcv1.Health, now time.Time) ([]bmcv1.Problem, bmcv1.Health) {
