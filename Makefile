@@ -27,8 +27,11 @@ build: ## Build kube-bmc and kubectl-bmc into bin/.
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/kubectl-bmc ./cmd/kubectl-bmc
 
 .PHONY: test
-test: ## Run the Go and UI unit tests.
+test: ## Run the Go unit tests.
 	go test -race -count=1 ./...
+
+.PHONY: test-ui
+test-ui: ## Run the UI unit tests.
 	cd ui && npm test
 
 .PHONY: e2e
@@ -36,7 +39,7 @@ e2e: ## Run the end-to-end test in a temporary kind cluster (requires docker, ki
 	test/e2e/run.sh
 
 .PHONY: verify
-verify: generate lint test ## Run the CI checks locally: generated code, lint and tests.
+verify: generate lint test test-ui ## Run the CI checks locally: generated code, lint and tests.
 	git diff --exit-code -- api config charts/kube-bmc/crds
 
 .PHONY: lint
