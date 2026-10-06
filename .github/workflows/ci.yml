@@ -39,6 +39,8 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - run: make ui
+      - run: npm test
+        working-directory: ui
 
   helm:
     runs-on: ubuntu-latest

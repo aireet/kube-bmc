@@ -27,8 +27,9 @@ build: ## Build kube-bmc and kubectl-bmc into bin/.
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/kubectl-bmc ./cmd/kubectl-bmc
 
 .PHONY: test
-test: ## Run unit tests.
+test: ## Run the Go and UI unit tests.
 	go test -race -count=1 ./...
+	cd ui && npm test
 
 .PHONY: e2e
 e2e: ## Run the end-to-end test in a temporary kind cluster (requires docker, kind, helm).
