@@ -3,6 +3,35 @@
 All notable changes to this project are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- Data race on the SDR cache path between the collector and the action controller, which
+  share one IPMI client.
+- A failed collection phase no longer overwrites data read earlier. A transient `mc info`,
+  `fru print` or DCMI failure used to blank the firmware, model and power draw until the next
+  inventory round; a partial hardware inventory keeps the sections it could not read.
+- A long in-band action, such as clearing a large SEL, could be marked Failed by the server
+  while the agent was still executing it. Executors now record `status.deadline` when they
+  start an action, and the server fails a Running action only after that deadline.
+- Each problem source raises at most one problem: a sensor that escalated from Warning to
+  Critical was listed twice, and several chassis faults overwrote each other. Chassis
+  intrusion is reported with the source `intrusion`.
+- A manual refresh in the dashboard while a request was in flight started a second polling
+  cycle.
+
+### Security
+- ServiceAccount token reviews are bounded: only JWTs naming a ServiceAccount of the kube-bmc
+  namespace are reviewed, results are kept in a fixed-size cache, concurrent reviews of one
+  token are coalesced and reviews are rate limited. A token that cannot be checked yields
+  `503` with `Retry-After` instead of `401`.
+- Read, write and idle timeouts and header limits on the server and agent HTTP servers, and a
+  1 MiB limit on MCP request bodies.
+
+### Added
+- `status.deadline` on BMCAction.
+- UI unit tests (`npm test`), run by `make test` and CI.
+
 ## [0.4.1] - 2026-10-06
 
 ### Fixed
