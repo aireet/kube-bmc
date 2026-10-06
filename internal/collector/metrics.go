@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -39,6 +40,11 @@ var (
 	descSensorSev = prometheus.NewDesc("kube_bmc_sensor_state", "Sensor state: 0 ok, 1 warning, 2 critical, -1 no reading.", []string{"sensor", "type"}, nil)
 	descInfo      = prometheus.NewDesc("kube_bmc_info", "BMC inventory as labels.",
 		[]string{"manufacturer", "product", "serial", "firmware", "bmc_ip", "bmc_mac"}, nil)
+	descInlet    = prometheus.NewDesc("kube_bmc_inlet_temperature_celsius", "Air inlet temperature.", nil, nil)
+	descHardware = prometheus.NewDesc("kube_bmc_hardware_info", "Host hardware as labels.",
+		[]string{"cpu_model", "cpu_sockets", "cpu_cores", "memory_gib"}, nil)
+	descGPUs  = prometheus.NewDesc("kube_bmc_gpus", "Number of GPUs by model.", []string{"model"}, nil)
+	descSlots = prometheus.NewDesc("kube_bmc_pcie_slots", "Number of PCIe slots by state (used or free).", []string{"state"}, nil)
 )
 
 var sevValue = map[ipmi.Severity]float64{
@@ -84,6 +90,23 @@ func (m Metrics) Collect(ch chan<- prometheus.Metric) {
 		gauge(descFault, 1, f)
 	}
 	gauge(descInfo, 1, s.FRU.Manufacturer, s.FRU.Product, s.FRU.SerialNumber, s.MC.FirmwareVersion, s.LAN.IPAddress, s.LAN.MACAddress)
+	if t, ok := InletTemperature(s.Sensors); ok {
+		gauge(descInlet, t)
+	}
+	if h := s.Hardware; h != nil {
+		gauge(descHardware, 1, h.CPU.Model, strconv.Itoa(h.CPU.Sockets), strconv.Itoa(h.CPU.Cores), strconv.Itoa(h.Memory.TotalGiB))
+		for model, n := range h.GPUModels() {
+			gauge(descGPUs, float64(n), model)
+		}
+		used := 0
+		for _, sl := range h.PCIeSlots {
+			if sl.InUse {
+				used++
+			}
+		}
+		gauge(descSlots, float64(used), "used")
+		gauge(descSlots, float64(len(h.PCIeSlots)-used), "free")
+	}
 	seen := map[string]bool{}
 	for _, sn := range s.Sensors {
 		if seen[sn.Name] { // some BMCs report duplicate sensor names

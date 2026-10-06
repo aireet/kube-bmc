@@ -117,6 +117,17 @@ auth:
     # Additional token audiences accepted from API and MCP clients.
     extraAudiences: []
 
+grafana:
+  dashboard:
+    # Create a ConfigMap with the kube-bmc dashboard for the Grafana dashboard sidecar
+    # (kube-prometheus-stack, grafana chart with sidecar.dashboards.enabled).
+    enabled: false
+    # Namespace of the ConfigMap; defaults to the release namespace.
+    namespace: ""
+    labels:
+      grafana_dashboard: "1"
+    annotations: {}
+
 metrics:
   # Create a PodMonitor for the agents (requires the Prometheus Operator CRDs).
   podMonitor:

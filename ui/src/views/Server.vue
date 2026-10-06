@@ -3,13 +3,14 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NIcon, NTabs, NTabPane, NAlert, NSkeleton, NProgress, NTag, NTooltip, NCard, NBreadcrumb, NBreadcrumbItem } from 'naive-ui'
 import {
-  OpenOutline, ServerOutline, HardwareChipOutline, GlobeOutline, LayersOutline, CubeOutline, ListOutline,
+  OpenOutline, ServerOutline, SpeedometerOutline, HardwareChipOutline, GlobeOutline, LayersOutline, CubeOutline, ListOutline,
   FlashOutline, ThermometerOutline, TimeOutline, AlertCircleOutline, CheckmarkCircleOutline,
 } from '@vicons/ionicons5'
 import { api } from '../api'
 import { usePoll } from '../poll'
 import { t } from '../i18n'
-import { ago, bmcURL, gpuShort, healthColor, watts } from '../format'
+import { ago, bmcURL, cpuShort, gpuSummary, healthColor, watts } from '../format'
+import PCIeSlots from '../components/PCIeSlots.vue'
 import HealthBadge from '../components/HealthBadge.vue'
 import PowerBadge from '../components/PowerBadge.vue'
 import InfoCard from '../components/InfoCard.vue'
@@ -115,6 +116,14 @@ const selColor = computed(() => {
           </div>
 
           <div class="cards">
+            <InfoCard v-if="s.hardware" :title="t('hardware')" :icon="SpeedometerOutline" :rows="[
+              [t('cpu'), s.hardware.cpu?.model ? `${s.hardware.cpu.sockets ?? 1}× ${cpuShort(s.hardware.cpu.model)}` : '—'],
+              [t('coresThreads'), s.hardware.cpu?.cores ? `${s.hardware.cpu.cores} / ${s.hardware.cpu.threads}` : '—'],
+              [t('memory'), s.hardware.memory?.totalGiB ? `${s.hardware.memory.totalGiB} GiB ${s.hardware.memory.type ?? ''}${s.hardware.memory.speedMTs ? `-${s.hardware.memory.speedMTs}` : ''}` : '—'],
+              [t('dimms'), s.hardware.memory?.slots ? `${s.hardware.memory.modules} / ${s.hardware.memory.slots}` : '—'],
+              [t('gpus'), s.hardware.gpus?.map((g) => `${g.count}× ${g.model}`).join(', ') || '—'],
+              [t('pcieSlots'), s.hardware.pcieSlots?.length ? t('slotsUsed', { used: String(s.hardware.pcieSlots.filter((x) => x.inUse).length), total: String(s.hardware.pcieSlots.length) }) : '—'],
+            ]" />
             <InfoCard :title="t('system')" :icon="ServerOutline" :rows="[
               [t('manufacturer'), s.device?.manufacturer],
               [t('product'), s.device?.product],
@@ -144,7 +153,7 @@ const selColor = computed(() => {
               ['Status', `${v.node.ready ? t('nodeReady') : t('notReady')}${v.node.unschedulable ? ` · ${t('cordoned')}` : ''}`],
               [t('roles'), v.node.roles?.join(', ')],
               [t('internalIP'), v.node.internalIP, true],
-              [t('gpus'), v.node.gpus ? `${v.node.gpus}× ${gpuShort(v.node.gpuModel) || 'GPU'}` : '—'],
+              [t('gpus'), gpuSummary(s.hardware, v.node.gpus, v.node.gpuModel) || '—'],
               [`${t('cpu')} / ${t('memory')}`, `${v.node.cpu} / ${v.node.memory}`],
               [t('kubelet'), v.node.kubeletVersion, true],
               [t('os'), v.node.osImage],
@@ -164,6 +173,7 @@ const selColor = computed(() => {
               <n-progress type="line" :percentage="s.sel?.usedPercent ?? 0" :color="selColor" :height="8" style="margin-top: 14px" />
             </InfoCard>
           </div>
+          <PCIeSlots v-if="s.hardware?.pcieSlots?.length" :slots="s.hardware.pcieSlots" />
         </n-tab-pane>
 
         <n-tab-pane name="sensors" :tab="`${t('sensors')}${s.sensors?.total ? ` · ${s.sensors.total}` : ''}`">

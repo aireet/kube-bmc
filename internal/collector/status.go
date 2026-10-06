@@ -1,7 +1,9 @@
 package collector
 
 import (
+	"maps"
 	"math"
+	"slices"
 
 	bmcv1 "github.com/aireet/kube-bmc/api/v1alpha1"
 )
@@ -43,6 +45,20 @@ func Status(s *Snapshot) bmcv1.BMCStatus {
 	if s.PowerWatts >= 0 {
 		w := int32(s.PowerWatts)
 		st.PowerWatts = &w
+	}
+	if h := s.Hardware; h != nil {
+		hw := &bmcv1.Hardware{
+			CPU:    bmcv1.HardwareCPU{Model: h.CPU.Model, Sockets: h.CPU.Sockets, Cores: h.CPU.Cores, Threads: h.CPU.Threads},
+			Memory: bmcv1.HardwareMemory{TotalGiB: h.Memory.TotalGiB, Modules: h.Memory.Modules, Slots: h.Memory.Slots, Type: h.Memory.Type, SpeedMTs: h.Memory.SpeedMTs},
+		}
+		models := h.GPUModels()
+		for _, m := range slices.Sorted(maps.Keys(models)) {
+			hw.GPUs = append(hw.GPUs, bmcv1.GPUModel{Model: m, Count: models[m]})
+		}
+		for _, sl := range h.PCIeSlots {
+			hw.PCIeSlots = append(hw.PCIeSlots, bmcv1.PCIeSlot{Name: sl.Name, Width: sl.Width, Generation: sl.Generation, InUse: sl.InUse, Device: sl.Device})
+		}
+		st.Hardware = hw
 	}
 	if t, ok := InletTemperature(s.Sensors); ok {
 		v := int32(math.Round(t))

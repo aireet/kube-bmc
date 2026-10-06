@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -37,6 +39,7 @@ import (
 	"github.com/aireet/kube-bmc/internal/auth"
 	"github.com/aireet/kube-bmc/internal/collector"
 	"github.com/aireet/kube-bmc/internal/controller"
+	"github.com/aireet/kube-bmc/internal/hostinv"
 	"github.com/aireet/kube-bmc/internal/ipmi"
 	"github.com/aireet/kube-bmc/internal/mcpserver"
 	"github.com/aireet/kube-bmc/internal/oob"
@@ -68,6 +71,12 @@ func run() error {
 		return runServer(ctx, os.Args[2:])
 	case "hash-password":
 		return hashPassword(os.Args[2:])
+	case "inventory":
+		inv, err := hostinv.Collect(ctx, execOutput, hostinv.SysfsResolver)
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(inv)
+		return err
 	case "version", "--version", "-v":
 		fmt.Println(version)
 	default:
@@ -77,7 +86,7 @@ func run() error {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: kube-bmc <agent|server|hash-password|version> [flags]\n\nRun 'kube-bmc <command> -h' for flags.\n")
+	fmt.Fprintf(os.Stderr, "usage: kube-bmc <agent|server|hash-password|inventory|version> [flags]\n\nRun 'kube-bmc <command> -h' for flags.\n")
 	os.Exit(2)
 }
 
@@ -141,6 +150,15 @@ func discoverOIDC(ctx context.Context, log *slog.Logger, cfg auth.OIDCConfig) (*
 	}
 }
 
+// execOutput runs a command and returns its standard output.
+func execOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+	out, err := exec.CommandContext(ctx, name, args...).Output()
+	if err != nil {
+		return out, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return out, nil
+}
+
 // envOr returns the environment variable key, or def when it is unset.
 func envOr(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok {
@@ -199,6 +217,9 @@ func runAgent(ctx context.Context, args []string) error {
 	}
 	ipmiClient := ipmi.NewClient(ipmi.Exec{Path: *ipmitool}, *cacheDir)
 	col := collector.New(*node, ipmiClient, collector.Options{
+		Hardware: func(ctx context.Context) (hostinv.Inventory, error) {
+			return hostinv.Collect(ctx, execOutput, hostinv.SysfsResolver)
+		},
 		Interval: *interval, InventoryInterval: *invInterval, SELMinInterval: *selInterval, SELEntries: *selEntries,
 		CommandTimeout: 30 * time.Second, SELTimeout: 3 * time.Minute,
 	}, log)

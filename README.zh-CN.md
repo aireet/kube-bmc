@@ -5,8 +5,9 @@
 <h1 align="center">kube-bmc</h1>
 
 <p align="center">
-  把服务器 BMC 作为 Kubernetes 资源管理：带内自动发现、硬件健康、带外电源控制，<br>
-  并提供 Web 控制台、kubectl 插件和面向 AI Agent 的 MCP 接口。
+  把服务器 BMC 作为 Kubernetes 资源管理：带内自动发现、硬件健康、电源控制，<br>
+  提供 Web 控制台、kubectl 插件、Grafana 面板，<br>
+  并通过 MCP 接口让 <b>AI Agent 也能查看和操作你的服务器</b>。
 </p>
 
 <p align="center">
@@ -31,11 +32,42 @@ server131   server131   10.20.0.31      Gooxi    SY8108G-G4   On      1240    43
 
 功能：
 
+- **硬件清单**：agent 从 SMBIOS 和 PCI 总线读取 CPU、内存配置、GPU 型号和 PCIe 插槽占用情况。
 - **资产与健康**：支持任意 IPMI 2.0 BMC，采集 FRU、固件、管理网络、带阈值的传感器、机箱故障、DCMI 功耗和系统事件日志（SEL），汇总为 `OK` / `Warning` / `Critical` 健康状态，并给出问题列表。
 - **电源控制**：关机、强制重启、断电重启由目标节点上的 agent 通过本机 BMC 通道（`/dev/ipmi0`）执行，不需要 BMC 账号密码，也不需要 BMC 管理网可达；开机需要带外通道（Redfish / IPMI-over-LAN）。每次请求都是一个 `BMCAction` 对象，同时作为审计记录。默认关闭。
 - **三种入口**：Web 控制台、`kubectl bmc` 插件和 MCP 接口。所有电源操作都会记录发起人身份。
 - **认证**：控制台支持 OpenID Connect 登录或内置用户名密码登录；API 和 MCP 客户端可使用 OIDC token，或 kube-bmc 所在 namespace 中 ServiceAccount 的 token。
 - **Prometheus 指标**：覆盖每个传感器，以及功耗、健康状态和 SEL 使用率。
+
+## 让 AI Agent 运维服务器
+
+kube-bmc 内置 [MCP](https://modelcontextprotocol.io) 服务。接入 Claude Code 或任意 MCP 客户端后，Agent 可以巡检整个集群的硬件，在你允许时还能直接操作：
+
+```bash
+claude mcp add --transport http kube-bmc https://kube-bmc.example.com/mcp \
+  --header "Authorization: Bearer $(kubectl -n kube-bmc-system create token mcp-agent)"
+```
+
+```text
+> 哪些服务器有硬件问题？机房该怎么处理？
+
+  ⏺ kube-bmc · fleet_summary
+  ⏺ kube-bmc · get_sensors  name=gpu-07 problemsOnly=true
+  ⏺ kube-bmc · get_events   name=gpu-07 limit=20
+
+  gpu-07 处于 Critical：FAN7、FAN8、FAN10、FAN11、FAN12 读数为 0 RPM，机箱报 Cooling Fault，
+  进风温度 47°C（50°C 为严重阈值）。建议尽快更换故障风扇模块。
+
+> 打开 gpu-07 的定位灯，方便机房同事找到它。
+
+  ⏺ kube-bmc · locate_server  name=gpu-07 on=true
+  已打开，定位灯会一直亮到手动关闭。
+```
+
+- **查看类工具**：`fleet_summary`、`list_servers`、`get_server`、`get_sensors`、`get_events`、`list_actions`、`get_action`
+- **操作类工具**：`locate_server`（定位灯）、`clear_sel`（清空 SEL）、`power_action`（关机、重启、断电重启、开机）
+
+Agent 的每个操作都是一个 `BMCAction`，会记录 Agent 身份和必填的原因；破坏性工具带有标注，客户端调用前会请求确认；也可以整体关闭操作功能。控制台右上角的 **"AI Agent"** 按钮提供现成的接入配置。
 
 ## 安装
 

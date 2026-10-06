@@ -36,11 +36,26 @@ export function num(v: number): string {
   return Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1)
 }
 
+/** Shortens a CPU model, e.g. "Intel Xeon Platinum 8468V" becomes "Xeon Platinum 8468V". */
+export const cpuShort = (model?: string) => (model ?? '').replace(/^(Intel|AMD)\s+/, '')
+
+/** GPU summary of a server, preferring the hardware inventory over the node label. */
+export function gpuSummary(hw?: { gpus?: { model: string; count: number }[] }, nodeGPUs?: number, nodeModel?: string): string {
+  if (hw?.gpus?.length) return hw.gpus.map((g) => `${g.count}× ${gpuShort(g.model)}`).join(', ')
+  if (nodeGPUs) return `${nodeGPUs}× ${gpuShort(nodeModel) || 'GPU'}`
+  return ''
+}
+
 export const bmcURL = (ip?: string) => (ip ? `https://${ip}` : undefined)
 
-/** Shortens a GPU product label, e.g. NVIDIA-GeForce-RTX-5090 becomes RTX 5090. */
+/**
+ * Shortens a GPU name: the node label NVIDIA-GeForce-RTX-5090 and the PCI name
+ * "NVIDIA GB202 [GeForce RTX 5090]" both become RTX 5090.
+ */
 export function gpuShort(model?: string): string {
   if (!model) return ''
+  const bracket = model.match(/\[([^\]]+)\]$/)
+  if (bracket) return bracket[1]!.replace(/^GeForce /, '')
   return model
     .replace(/^NVIDIA-/, '')
     .replace(/^GeForce-/, '')

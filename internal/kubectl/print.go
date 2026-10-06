@@ -108,6 +108,29 @@ func describe(w io.Writer, b *bmcv1.BMC, actions []bmcv1.BMCAction, color bool) 
 	line("System", strings.TrimSpace(fmt.Sprintf("%s %s %s", s.Device.Manufacturer, s.Device.Product, s.Device.Version)))
 	line("Serial", fmt.Sprintf("%s (part %s)", orDash(s.Device.SerialNumber), orDash(s.Device.PartNumber)))
 	line("Board", fmt.Sprintf("%s (serial %s)", orDash(s.Device.BoardProduct), orDash(s.Device.BoardSerial)))
+	if h := s.Hardware; h != nil {
+		line("CPU", fmt.Sprintf("%d× %s, %d cores, %d threads", h.CPU.Sockets, orDash(h.CPU.Model), h.CPU.Cores, h.CPU.Threads))
+		line("Memory", fmt.Sprintf("%d GiB %s-%d, %d of %d DIMM slots", h.Memory.TotalGiB, h.Memory.Type, h.Memory.SpeedMTs, h.Memory.Modules, h.Memory.Slots))
+		var gpus []string
+		for _, g := range h.GPUs {
+			gpus = append(gpus, fmt.Sprintf("%d× %s", g.Count, g.Model))
+		}
+		line("GPUs", orDash(strings.Join(gpus, ", ")))
+		var slots []string
+		used := 0
+		for _, sl := range h.PCIeSlots {
+			state := "free"
+			if sl.InUse {
+				used++
+				state = orDash(sl.Device)
+			}
+			slots = append(slots, fmt.Sprintf("%s %s %s: %s", sl.Name, sl.Generation, sl.Width, state))
+		}
+		line("PCIe slots", fmt.Sprintf("%d of %d in use", used, len(h.PCIeSlots)))
+		for _, sl := range slots {
+			line("", "  "+sl)
+		}
+	}
 	line("BMC firmware", fmt.Sprintf("%s (IPMI %s, IANA %s)", orDash(s.Controller.FirmwareVersion), orDash(s.Controller.IPMIVersion), orDash(s.Controller.ManufacturerID)))
 	line("BMC network", fmt.Sprintf("%s/%s via %s, MAC %s, %s, channel %d", orDash(s.Network.IPAddress), orDash(s.Network.Netmask),
 		orDash(s.Network.Gateway), orDash(s.Network.MACAddress), orDash(s.Network.Source), s.Network.Channel))

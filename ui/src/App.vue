@@ -7,6 +7,7 @@ import {
 import { MoonOutline, SunnyOutline, LogoGithub, LanguageOutline } from '@vicons/ionicons5'
 import Logo from './components/Logo.vue'
 import UserMenu from './components/UserMenu.vue'
+import AgentConnect from './components/AgentConnect.vue'
 import SignedOut from './components/SignedOut.vue'
 import { api } from './api'
 import { config, me } from './store'
@@ -91,6 +92,7 @@ onMounted(async () => {
               <router-link to="/actions" class="navlink" active-class="active">{{ t('actionsNav') }}</router-link>
             </nav>
             <div class="spacer" />
+            <AgentConnect />
             <span v-if="config.version" class="version mono muted">{{ config.version }}</span>
             <n-dropdown :options="langOptions" :value="locale" @select="setLocale">
               <n-button quaternary circle :aria-label="'Language'">

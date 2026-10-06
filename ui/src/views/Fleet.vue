@@ -13,7 +13,7 @@ import { api } from '../api'
 import { usePoll } from '../poll'
 import type { Health, View } from '../types'
 import { t } from '../i18n'
-import { ago, gpuShort, healthColor, watts } from '../format'
+import { ago, cpuShort, gpuSummary, healthColor, watts } from '../format'
 import StatTile from '../components/StatTile.vue'
 import ServerCard from '../components/ServerCard.vue'
 import HealthBadge from '../components/HealthBadge.vue'
@@ -47,6 +47,7 @@ const rank: Record<string, number> = { Critical: 0, Warning: 1, Unknown: 2, OK: 
 const stats = computed(() => {
   const v = views.value
   const by = (h: Health) => v.filter((x) => (x.status.health ?? 'Unknown') === h).length
+  const gpuCount = v.reduce((a, x) => a + (x.status.hardware?.gpus?.reduce((n, g) => n + g.count, 0) ?? x.node?.gpus ?? 0), 0)
   const watt = v.reduce((a, x) => a + (x.status.powerState === 'On' ? x.status.powerWatts ?? 0 : 0), 0)
   const inlets = v.map((x) => x.status.inletTemperature).filter((x): x is number => x != null)
   return {
@@ -57,7 +58,7 @@ const stats = computed(() => {
     on: v.filter((x) => x.status.powerState === 'On').length,
     watts: watt,
     inlet: inlets.length ? Math.round(inlets.reduce((a, b) => a + b, 0) / inlets.length) : undefined,
-    gpus: v.reduce((a, x) => a + (x.node?.gpus ?? 0), 0),
+    gpus: gpuCount,
   }
 })
 
@@ -112,8 +113,15 @@ const columns = computed<DataTableColumns<View>>(() => [
     render: (v) => `${v.status.device?.manufacturer ?? '—'} ${v.status.device?.product ?? ''}`,
   },
   {
-    title: t('gpus'), key: 'gpus', width: 130,
-    render: (v) => (v.node?.gpus ? `${v.node.gpus}× ${gpuShort(v.node.gpuModel) || 'GPU'}` : '—'),
+    title: t('gpus'), key: 'gpus', width: 150,
+    render: (v) => gpuSummary(v.status.hardware, v.node?.gpus, v.node?.gpuModel) || '—',
+  },
+  {
+    title: t('cpu'), key: 'cpu', width: 230, ellipsis: { tooltip: true },
+    render: (v) => {
+      const c = v.status.hardware?.cpu
+      return c?.model ? `${c.sockets ?? 1}× ${cpuShort(c.model)}` : '—'
+    },
   },
   { title: t('bmcIP'), key: 'ip', width: 130, render: (v) => h('span', { class: 'mono' }, v.status.network?.ipAddress ?? '—') },
   { title: t('firmware'), key: 'fw', width: 120, ellipsis: { tooltip: true }, render: (v) => v.status.controller?.firmwareVersion ?? '—' },

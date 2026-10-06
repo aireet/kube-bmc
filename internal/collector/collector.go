@@ -3,7 +3,8 @@
 // Data is collected on three schedules according to its cost and rate of change:
 //
 //   - Interval: sensors, chassis status, DCMI power and SEL info.
-//   - InventoryInterval: FRU, LAN configuration, firmware and sensor thresholds.
+//   - InventoryInterval: FRU, LAN configuration, firmware, sensor thresholds and the host
+//     hardware (processors, memory, PCIe slots and GPUs).
 //   - SEL entries are read only after `sel info` reports a new entry, at most once per SELMinInterval.
 package collector
 
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aireet/kube-bmc/internal/hostinv"
 	"github.com/aireet/kube-bmc/internal/ipmi"
 )
 
@@ -30,12 +32,15 @@ type Snapshot struct {
 	PowerWatts  int                        `json:"powerWatts"`
 	Sensors     []ipmi.Sensor              `json:"sensors"`
 	Events      []ipmi.Event               `json:"events"`
+	Hardware    *hostinv.Inventory         `json:"hardware,omitempty"`
 	Thresholds  map[string]ipmi.Thresholds `json:"-"`
 	// Errors holds the most recent error of each failing collection phase.
 	Errors map[string]string `json:"errors,omitempty"`
 }
 
 type Options struct {
+	// Hardware reads the host hardware inventory. Nil disables it.
+	Hardware          func(ctx context.Context) (hostinv.Inventory, error)
 	Interval          time.Duration
 	InventoryInterval time.Duration
 	SELMinInterval    time.Duration
@@ -189,6 +194,15 @@ func (c *Collector) inventory(ctx context.Context) {
 		c.set(func(s *Snapshot) { s.FRU = fru })
 		return err
 	})
+	if c.opts.Hardware != nil {
+		c.step(ctx, "hardware", t, func(ctx context.Context) error {
+			inv, err := c.opts.Hardware(ctx)
+			if inv.CPU.Sockets > 0 || len(inv.PCIeSlots) > 0 || len(inv.GPUs) > 0 {
+				c.set(func(s *Snapshot) { s.Hardware = &inv })
+			}
+			return err
+		})
+	}
 	c.step(ctx, "thresholds", c.opts.SELTimeout, func(ctx context.Context) error {
 		th, err := c.client.Thresholds(ctx)
 		if err == nil {

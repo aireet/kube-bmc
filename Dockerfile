@@ -19,8 +19,9 @@ COPY --from=ui /src/web/dist ./web/dist
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/kube-bmc ./cmd/kube-bmc
 
-# ---- runtime: ipmitool is the only dependency (used by the agent) ----
+# ---- runtime ----
 FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
-RUN apk add --no-cache ipmitool ca-certificates tzdata
+# ipmitool reads the BMC; dmidecode, pciutils and hwdata-pci read the host hardware inventory.
+RUN apk add --no-cache ipmitool dmidecode pciutils hwdata-pci ca-certificates tzdata
 COPY --from=build /out/kube-bmc /usr/local/bin/kube-bmc
 ENTRYPOINT ["kube-bmc"]

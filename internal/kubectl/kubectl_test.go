@@ -30,6 +30,11 @@ func fixtureBMC(name string, h bmcv1.Health) *bmcv1.BMC {
 	b.Status = bmcv1.BMCStatus{Health: h, PowerState: bmcv1.PowerOn, PowerWatts: &w, InletTemperature: &temp, LastUpdated: &now}
 	b.Status.Device.Manufacturer, b.Status.Device.Product = "Gooxi", "SY8108G-G4"
 	b.Status.Network.IPAddress = "10.20.0.31"
+	b.Status.Hardware = &bmcv1.Hardware{
+		CPU:       bmcv1.HardwareCPU{Model: "Intel Xeon Platinum 8468V", Sockets: 2, Cores: 96, Threads: 192},
+		GPUs:      []bmcv1.GPUModel{{Model: "NVIDIA GB202 [GeForce RTX 5090]", Count: 8}},
+		PCIeSlots: []bmcv1.PCIeSlot{{Name: "PCIE1", Width: "x16", Generation: "Gen5", InUse: true, Device: "NVIDIA GB202 [GeForce RTX 5090]"}, {Name: "PCIE4", Width: "x8", Generation: "Gen5"}},
+	}
 	if h == bmcv1.HealthCritical {
 		b.Status.Problems = []bmcv1.Problem{
 			{Severity: bmcv1.HealthCritical, Source: "FAN7", Message: "0 RPM below lower non-recoverable"},
@@ -117,7 +122,8 @@ func TestDescribe(t *testing.T) {
 	if err := h.run(t, "describe", "server131"); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Health:", "Critical", "Gooxi SY8108G-G4", "Problems:", "FAN7", "Recent actions:"} {
+	for _, want := range []string{"Health:", "Critical", "Gooxi SY8108G-G4", "Problems:", "FAN7", "Recent actions:",
+		"2× Intel Xeon Platinum 8468V", "8× NVIDIA GB202 [GeForce RTX 5090]", "1 of 2 in use", "PCIE4 Gen5 x8: free"} {
 		if !strings.Contains(h.out.String(), want) {
 			t.Errorf("describe output missing %q:\n%s", want, h.out)
 		}

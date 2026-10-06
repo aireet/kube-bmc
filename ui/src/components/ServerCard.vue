@@ -5,7 +5,7 @@ import { FlashOutline, ThermometerOutline, HardwareChipOutline, OpenOutline, Ale
 import type { View } from '../types'
 import HealthBadge from './HealthBadge.vue'
 import PowerBadge from './PowerBadge.vue'
-import { bmcURL, gpuShort, healthColor, watts } from '../format'
+import { bmcURL, cpuShort, gpuSummary, healthColor, watts } from '../format'
 import { t } from '../i18n'
 
 const props = defineProps<{ v: View }>()
@@ -13,6 +13,11 @@ const s = computed(() => props.v.status)
 const health = computed(() => s.value.health ?? 'Unknown')
 const top = computed(() => s.value.problems?.[0])
 const more = computed(() => Math.max(0, (s.value.problems?.length ?? 0) - 1))
+const gpus = computed(() => gpuSummary(s.value.hardware, props.v.node?.gpus, props.v.node?.gpuModel))
+const cpu = computed(() => {
+  const c = s.value.hardware?.cpu
+  return c?.model ? `${c.sockets && c.sockets > 1 ? `${c.sockets}× ` : ''}${cpuShort(c.model)}` : ''
+})
 </script>
 
 <template>
@@ -34,11 +39,12 @@ const more = computed(() => Math.max(0, (s.value.problems?.length ?? 0) - 1))
         <n-icon :component="ThermometerOutline" class="ic" />
         <span>{{ s.inletTemperature != null ? `${s.inletTemperature}°C` : '—' }}</span>
       </div>
-      <div v-if="v.node?.gpus" class="metric">
+      <div v-if="gpus" class="metric">
         <n-icon :component="HardwareChipOutline" class="ic" />
-        <span>{{ v.node.gpus }}× {{ gpuShort(v.node.gpuModel) || 'GPU' }}</span>
+        <span>{{ gpus }}</span>
       </div>
     </div>
+    <div v-if="cpu" class="cpu muted">{{ cpu }}<template v-if="s.hardware?.memory?.totalGiB"> · {{ s.hardware.memory.totalGiB }} GiB</template></div>
 
     <div class="foot">
       <a v-if="s.network?.ipAddress" class="bmc mono" :href="bmcURL(s.network.ipAddress)" target="_blank" rel="noopener" @click.stop>
@@ -98,6 +104,7 @@ const more = computed(() => Math.max(0, (s.value.problems?.length ?? 0) - 1))
 .name { font-weight: 650; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .model { font-size: 12.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .metrics { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13.5px; }
+.cpu { font-size: 12.5px; margin-top: -6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .metric { display: flex; align-items: center; gap: 5px; }
 .ic { color: var(--kb-muted); }
 .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

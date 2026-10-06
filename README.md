@@ -6,7 +6,8 @@
 
 <p align="center">
   Baseboard management controllers as Kubernetes resources: in-band discovery, hardware health,<br>
-  out-of-band power control, a web dashboard, a kubectl plugin and an MCP endpoint for AI agents.
+  power control, a web dashboard, a kubectl plugin, a Grafana dashboard,<br>
+  and an MCP endpoint so that <b>AI agents can inspect and operate your servers</b>.
 </p>
 
 <p align="center">
@@ -19,6 +20,7 @@
 <p align="center">
   <a href="README.zh-CN.md">简体中文</a> ·
   <a href="#installation">Installation</a> ·
+  <a href="#operate-servers-with-ai-agents">AI agents</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="docs/authentication.md">Authentication</a> ·
   <a href="docs/mcp.md">MCP</a> ·
@@ -66,11 +68,53 @@ Features:
   Log are executed by the agent on the node through its local BMC interface, without BMC
   credentials; power on uses Redfish or IPMI-over-LAN. Every request is a `BMCAction` object,
   which serves as the audit record. Disabled by default.
-- **Three interfaces**: the web dashboard, the `kubectl bmc` plugin and an MCP endpoint for AI
-  agents. Power actions from all of them are recorded with the requester's identity.
+- **AI agents**: an MCP endpoint lets Claude Code and other agents inspect hardware and operate
+  BMCs, with every action audited. See [Operate servers with AI agents](#operate-servers-with-ai-agents).
+- **Hardware inventory**: CPU and memory configuration, GPUs and PCIe slot occupancy, read by the
+  agent from SMBIOS and the PCI bus.
+- **Three human interfaces**: the web dashboard, the `kubectl bmc` plugin and a Grafana dashboard.
 - **Authentication** with OpenID Connect or built-in username and password for the dashboard, and
   OIDC or ServiceAccount bearer tokens for API and MCP clients.
 - **Prometheus metrics** for every sensor, power draw, health and SEL usage.
+
+## Operate servers with AI agents
+
+kube-bmc includes a [Model Context Protocol](https://modelcontextprotocol.io) server. Connect Claude
+Code, or any MCP client, and an agent can triage hardware across the fleet and, when you allow
+it, act on it:
+
+```bash
+claude mcp add --transport http kube-bmc https://kube-bmc.example.com/mcp \
+  --header "Authorization: Bearer $(kubectl -n kube-bmc-system create token mcp-agent)"
+```
+
+```text
+> Which servers have hardware problems, and what should the data-center team do?
+
+  ⏺ kube-bmc · fleet_summary
+  ⏺ kube-bmc · get_sensors  name=gpu-07 problemsOnly=true
+  ⏺ kube-bmc · get_events   name=gpu-07 limit=20
+
+  gpu-07 (Gooxi SY8108G-G4) is critical: FAN7, FAN8, FAN10, FAN11 and FAN12 read 0 RPM and
+  the chassis reports a cooling fault. Inlet temperature is 47 °C (critical above 50 °C).
+  Replace the failed fan modules soon; the GPUs are still within limits.
+  infer-02 is a warning: its event log is full and contains 25 failed BMC logins.
+
+> Turn on the identify light of gpu-07 so the technician can find it.
+
+  ⏺ kube-bmc · locate_server  name=gpu-07 on=true
+  Done. The light stays on until it is turned off.
+```
+
+| Tools | |
+|---|---|
+| Inspect | `fleet_summary`, `list_servers`, `get_server`, `get_sensors`, `get_events`, `list_actions`, `get_action` |
+| Act | `locate_server`, `clear_sel`, `power_action` (shutdown, restart, power cycle, power on) |
+
+Agents are first-class but accountable: every action is a `BMCAction` recorded with the agent's
+identity and a mandatory reason, destructive tools are annotated so clients ask before calling
+them, and actions can be disabled entirely. The dashboard's **AI agents** dialog shows the
+endpoint and a ready-to-copy client configuration. See [docs/mcp.md](docs/mcp.md).
 
 ## Installation
 
@@ -240,23 +284,6 @@ auth:
 [docs/authentication.md](docs/authentication.md) describes both modes step by step, with guides
 for common identity providers and troubleshooting.
 
-## MCP endpoint
-
-The server exposes the Model Context Protocol over Streamable HTTP at `/mcp`. Tools:
-`fleet_summary`, `list_servers`, `get_server`, `get_sensors`, `get_events`, `list_actions`,
-`get_action`, `power_action`, `locate_server` and `clear_sel`, plus a `diagnose_server` prompt.
-
-```bash
-claude mcp add --transport http kube-bmc https://kube-bmc.example.com/mcp \
-  --header "Authorization: Bearer $TOKEN"
-```
-
-`$TOKEN` is an OIDC ID token or the token of a ServiceAccount in the kube-bmc namespace
-(`kubectl -n kube-bmc-system create token <serviceaccount>`).
-
-`power_action` and `clear_sel` are annotated as destructive and require a reason. See
-[docs/mcp.md](docs/mcp.md).
-
 ## kubectl plugin
 
 ```console
@@ -287,10 +314,14 @@ Agents expose Prometheus metrics on port 9580. Every metric carries a `node` lab
 | `kube_bmc_sensor_state{sensor,type}` | 0 ok, 1 warning, 2 critical, -1 no reading |
 | `kube_bmc_chassis_fault{fault}` | Active chassis faults |
 | `kube_bmc_sel_used_ratio`, `kube_bmc_sel_entries` | System Event Log usage |
-| `kube_bmc_info{manufacturer,product,serial,firmware,bmc_ip,bmc_mac}` | Inventory |
+| `kube_bmc_inlet_temperature_celsius` | Air inlet temperature |
+| `kube_bmc_info{manufacturer,product,serial,firmware,bmc_ip,bmc_mac}` | BMC inventory |
+| `kube_bmc_hardware_info{cpu_model,cpu_sockets,cpu_cores,memory_gib}` | Host hardware |
+| `kube_bmc_gpus{model}`, `kube_bmc_pcie_slots{state}` | GPUs by model, PCIe slots used and free |
 | `kube_bmc_collect_duration_seconds{phase}`, `kube_bmc_collect_errors_total{phase}` | Collector performance |
 
-Example alerting rules: [examples/prometheus-rules.yaml](examples/prometheus-rules.yaml).
+Example alerting rules: [examples/prometheus-rules.yaml](examples/prometheus-rules.yaml). A Grafana
+dashboard is included; see [docs/grafana.md](docs/grafana.md).
 
 ## Security
 
@@ -324,6 +355,7 @@ All chart values are documented in [charts/kube-bmc/values.yaml](charts/kube-bmc
 | `auth.existingSecret` | `""` | Secret with `session-secret`, `htpasswd` (password) or `client-secret` (oidc) |
 | `auth.oidc.issuerURL` | `""` | OIDC issuer |
 | `metrics.podMonitor.enabled` | `false` | Create a PodMonitor for the agents |
+| `grafana.dashboard.enabled` | `false` | Create the Grafana dashboard ConfigMap for the dashboard sidecar |
 
 ## Development
 

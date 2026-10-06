@@ -25,6 +25,7 @@ export interface BMCStatus {
     manufacturer?: string; product?: string; version?: string; serialNumber?: string; partNumber?: string
     boardProduct?: string; boardSerial?: string; chassisType?: string; chassisSerial?: string
   }
+  hardware?: Hardware
   controller?: { firmwareVersion?: string; ipmiVersion?: string; manufacturerID?: string; productID?: string; guid?: string }
   network?: { channel?: number; ipAddress?: string; netmask?: string; gateway?: string; macAddress?: string; source?: string; vlan?: string }
   chassis?: { powerRestorePolicy?: string; lastPowerEvent?: string; intrusionActive?: boolean; faults?: string[] }
@@ -34,6 +35,13 @@ export interface BMCStatus {
   agentVersion?: string
   lastUpdated?: string
   conditions?: Condition[]
+}
+
+export interface Hardware {
+  cpu?: { model?: string; sockets?: number; cores?: number; threads?: number }
+  memory?: { totalGiB?: number; modules?: number; slots?: number; type?: string; speedMTs?: number }
+  gpus?: { model: string; count: number }[]
+  pcieSlots?: { name: string; width?: string; generation?: string; inUse: boolean; device?: string }[]
 }
 
 export interface BMCSpec {

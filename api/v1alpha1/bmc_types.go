@@ -145,6 +145,54 @@ type Problem struct {
 	Message string `json:"message"`
 }
 
+// Hardware is the host hardware, read by the node agent from SMBIOS and PCI. It is not
+// available through IPMI.
+type Hardware struct {
+	// +optional
+	CPU HardwareCPU `json:"cpu,omitempty"`
+	// +optional
+	Memory HardwareMemory `json:"memory,omitempty"`
+	// GPUs are grouped by model.
+	// +optional
+	// +listType=atomic
+	GPUs []GPUModel `json:"gpus,omitempty"`
+	// +optional
+	// +listType=atomic
+	PCIeSlots []PCIeSlot `json:"pcieSlots,omitempty"`
+}
+
+// HardwareCPU summarizes the processors.
+type HardwareCPU struct {
+	Model   string `json:"model,omitempty"`
+	Sockets int    `json:"sockets,omitempty"`
+	Cores   int    `json:"cores,omitempty"`
+	Threads int    `json:"threads,omitempty"`
+}
+
+// HardwareMemory summarizes the memory modules.
+type HardwareMemory struct {
+	TotalGiB int    `json:"totalGiB,omitempty"`
+	Modules  int    `json:"modules,omitempty"`
+	Slots    int    `json:"slots,omitempty"`
+	Type     string `json:"type,omitempty"`
+	SpeedMTs int    `json:"speedMTs,omitempty"`
+}
+
+// GPUModel counts the GPUs of one model.
+type GPUModel struct {
+	Model string `json:"model"`
+	Count int    `json:"count"`
+}
+
+// PCIeSlot is a physical PCIe slot and the device installed in it.
+type PCIeSlot struct {
+	Name       string `json:"name"`
+	Width      string `json:"width,omitempty"`
+	Generation string `json:"generation,omitempty"`
+	InUse      bool   `json:"inUse"`
+	Device     string `json:"device,omitempty"`
+}
+
 // BMCStatus is observed state, written by the node agent.
 type BMCStatus struct {
 	// +optional
@@ -160,6 +208,8 @@ type BMCStatus struct {
 
 	// +optional
 	Device Device `json:"device,omitempty"`
+	// +optional
+	Hardware *Hardware `json:"hardware,omitempty"`
 	// +optional
 	Controller Controller `json:"controller,omitempty"`
 	// +optional

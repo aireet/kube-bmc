@@ -230,6 +230,74 @@ spec:
                   version:
                     type: string
                 type: object
+              hardware:
+                description: |-
+                  Hardware is the host hardware, read by the node agent from SMBIOS and PCI. It is not
+                  available through IPMI.
+                properties:
+                  cpu:
+                    description: HardwareCPU summarizes the processors.
+                    properties:
+                      cores:
+                        type: integer
+                      model:
+                        type: string
+                      sockets:
+                        type: integer
+                      threads:
+                        type: integer
+                    type: object
+                  gpus:
+                    description: GPUs are grouped by model.
+                    items:
+                      description: GPUModel counts the GPUs of one model.
+                      properties:
+                        count:
+                          type: integer
+                        model:
+                          type: string
+                      required:
+                      - count
+                      - model
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  memory:
+                    description: HardwareMemory summarizes the memory modules.
+                    properties:
+                      modules:
+                        type: integer
+                      slots:
+                        type: integer
+                      speedMTs:
+                        type: integer
+                      totalGiB:
+                        type: integer
+                      type:
+                        type: string
+                    type: object
+                  pcieSlots:
+                    items:
+                      description: PCIeSlot is a physical PCIe slot and the device
+                        installed in it.
+                      properties:
+                        device:
+                          type: string
+                        generation:
+                          type: string
+                        inUse:
+                          type: boolean
+                        name:
+                          type: string
+                        width:
+                          type: string
+                      required:
+                      - inUse
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
               health:
                 description: Health is the aggregated hardware health reported by
                   a BMC.

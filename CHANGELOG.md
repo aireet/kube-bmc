@@ -3,15 +3,24 @@
 All notable changes to this project are documented in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.3.1] - 2026-10-06
+## [0.4.0] - 2026-10-06
+
+### Added
+- Hardware inventory from the host: CPU model, sockets, cores and threads; memory size, modules
+  and slots; GPUs by model; PCIe slots with width, generation, occupancy and the installed device.
+  Read by the agent with dmidecode, lspci and sysfs, shown in the dashboard, `kubectl bmc describe`,
+  `status.hardware` and the metrics `kube_bmc_hardware_info`, `kube_bmc_gpus` and
+  `kube_bmc_pcie_slots`. `kube-bmc inventory` prints the inventory of the local host.
+- `kube_bmc_inlet_temperature_celsius` metric.
+- Grafana dashboard (`charts/kube-bmc/dashboards/kube-bmc.json`, optional ConfigMap for the
+  dashboard sidecar with `grafana.dashboard.enabled`).
+- Dashboard dialog "AI agents" with the MCP endpoint and client configuration.
+- `kubectl bmc sel-archives NAME [--show ARCHIVE]` lists and prints saved System Event Logs.
 
 ### Changed
 - SEL archives are always gzip-compressed and kept per server up to
   `server.actions.selArchivesPerServer` (default 3, agent flag `--sel-archives`); older archives
   are deleted. Archives no longer expire with the action TTL.
-
-### Added
-- `kubectl bmc sel-archives NAME [--show ARCHIVE]` lists and prints saved System Event Logs.
 
 ### Fixed
 - After ClearSEL, the problems derived from the log (SEL full, failed BMC logins) are removed
