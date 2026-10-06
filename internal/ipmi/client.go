@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 // Runner executes ipmitool commands.
@@ -50,10 +52,17 @@ func (e Exec) Run(ctx context.Context, args ...string) ([]byte, error) {
 //
 // Reading the SDR repository over KCS takes several seconds, so the client dumps it to a
 // cache file and passes `-S` to sensor and SEL commands.
+//
+// A Client is safe for concurrent use: the collector and the action controller share one.
 type Client struct {
 	Runner   Runner
 	CacheDir string
-	sdrCache string
+
+	// refreshMu serializes RefreshSDRCache, which writes a fixed temporary file.
+	refreshMu sync.Mutex
+	// sdrCache is the path of a valid cache file, or nil when commands must read the
+	// SDR repository directly.
+	sdrCache atomic.Pointer[string]
 }
 
 func NewClient(r Runner, cacheDir string) *Client {
@@ -65,24 +74,29 @@ func (c *Client) RefreshSDRCache(ctx context.Context) error {
 	if c.CacheDir == "" {
 		return nil
 	}
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
 	path := c.CacheDir + "/sdr.cache"
 	tmp := path + ".tmp"
 	if _, err := c.Runner.Run(ctx, "sdr", "dump", tmp); err != nil {
-		c.sdrCache = ""
+		c.sdrCache.Store(nil)
 		return err
 	}
+	// The rename is atomic, so concurrent commands read either the old or the new file.
 	if err := os.Rename(tmp, path); err != nil {
+		c.sdrCache.Store(nil)
 		return err
 	}
-	c.sdrCache = path
+	c.sdrCache.Store(&path)
 	return nil
 }
 
 func (c *Client) withCache(args ...string) []string {
-	if c.sdrCache == "" {
+	path := c.sdrCache.Load()
+	if path == nil {
 		return args
 	}
-	return append([]string{"-S", c.sdrCache}, args...)
+	return append([]string{"-S", *path}, args...)
 }
 
 func (c *Client) MCInfo(ctx context.Context) (MCInfo, error) {
